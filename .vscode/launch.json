@@ -1,0 +1,10 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "firebase_ai_comic_reader",
+      "request": "launch",
+      "type": "dart"
+    }
+  ]
+}

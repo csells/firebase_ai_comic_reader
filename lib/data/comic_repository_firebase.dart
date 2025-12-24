@@ -76,10 +76,10 @@ class ComicRepositoryFirebase implements ComicRepository {
 
       // Delete all files in the comic folder
       await Future.wait(comicFiles.items.map((item) => item.delete()));
-      await comicRef.delete();
     } catch (e) {
       debugPrint(
-          'ComicReader: Firebase Storage: Error deleting comic files: $e');
+        'ComicReader: Firebase Storage: Error deleting comic files: $e',
+      );
       rethrow;
     }
     try {
@@ -99,15 +99,18 @@ class ComicRepositoryFirebase implements ComicRepository {
 
   @override
   Future<void> updateCurrentPage(
-      String userId, String comicId, int currentPage) async {
+    String userId,
+    String comicId,
+    int currentPage,
+  ) async {
     await _firestore
         .collection('users')
         .doc(userId)
         .collection('comics')
         .doc(comicId)
         .update({
-      'currentPage': currentPage,
-      'lastReadDate': DateTime.now().toIso8601String(),
-    });
+          'currentPage': currentPage,
+          'lastReadDate': DateTime.now().toIso8601String(),
+        });
   }
 }

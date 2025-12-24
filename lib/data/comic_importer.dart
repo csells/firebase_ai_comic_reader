@@ -1,22 +1,18 @@
-// 241223: TODO:
-// 1. Improve LLM prompt to handle situations where there is no text in the image.
-
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:ui';
 
 import 'package:archive/archive.dart' as zip;
 import 'package:comic_reader/data/comic_repository_firebase.dart';
-import 'package:comic_reader/gemini_api_key.dart' as gemini_api_key;
 import 'package:comic_reader/models/comic.dart';
 import 'package:comic_reader/models/comic_predictions.dart';
+import 'package:comic_reader/models/panel.dart';
 import 'package:comic_reader/models/predictions.dart';
-import 'package:comic_reader/utils/auth_utils.dart'; // getGoogleAccessToken
-import 'package:comic_reader/utils/prediction_utils.dart' as pred_utils;
+import 'package:firebase_ai/firebase_ai.dart';
 import 'package:firebase_auth/firebase_auth.dart' as auth;
 import 'package:firebase_storage/firebase_storage.dart' as fs;
 import 'package:flutter/foundation.dart';
-import 'package:http/http.dart' as http;
 import 'package:image/image.dart' as img;
 import 'package:path/path.dart' as path;
 import 'package:rar/rar.dart';
@@ -37,13 +33,13 @@ class ComicImporter {
     'System Volume Information',
     '__macosx',
     r'$recycle.bin',
-    'system volume information'
+    'system volume information',
   ];
 
   static const List<String> _ignoredFiles = [
     'thumbs.db',
     'desktop.ini',
-    '.ds_store'
+    '.ds_store',
   ];
 
   static const List<String> _allowedExtensions = ['.jpg', '.jpeg', '.png'];
@@ -100,8 +96,9 @@ class ComicImporter {
 
       if (path.extension(fileName).toLowerCase() == '.cbr') {
         // RAR support via 'rar' package (requires file I/O)
-        final tempDir =
-            await Directory.systemTemp.createTemp('comic_reader_rar_');
+        final tempDir = await Directory.systemTemp.createTemp(
+          'comic_reader_rar_',
+        );
         try {
           final tempRarFile = File(path.join(tempDir.path, 'temp.cbr'));
           await tempRarFile.writeAsBytes(comicBytes);
@@ -133,11 +130,16 @@ class ComicImporter {
                 }
 
                 final bytes = await entity.readAsBytes();
-                final relativePath =
-                    path.relative(entity.path, from: extractDir.path);
+                final relativePath = path.relative(
+                  entity.path,
+                  from: extractDir.path,
+                );
                 // Create ArchiveFile. mode/compress defaults are fine.
-                final archiveFile =
-                    zip.ArchiveFile(relativePath, bytes.length, bytes);
+                final archiveFile = zip.ArchiveFile(
+                  relativePath,
+                  bytes.length,
+                  bytes,
+                );
                 imageFiles.add(archiveFile);
               }
             }
@@ -167,16 +169,66 @@ class ComicImporter {
         throw Exception('No valid image files found in the provided archive.');
       }
 
-      // Phase 1: Upload images => 0% .. 70%
-      final pageUrls = await _uploadFilesScaled(
-        imageFiles: imageFiles,
-        comicRootPath: comicRootPath,
-        progressStream: progressStream,
-        startFrac: 0.0,
-        endFrac: 0.70,
-        isCancelled: () => isCancelled,
+      // Phase 1: Upload & Analyze images => 0% .. 100%
+      final totalFiles = imageFiles.length;
+      final pageUrls = <String>[];
+      final List<Map<String, String>> pageSummaries = List.generate(
+        totalFiles,
+        (_) => {},
+        growable: false,
       );
-      checkCancellation();
+      final List<Map<String, dynamic>> panelSummaries = List.generate(
+        totalFiles,
+        (_) => {'panels': <Map<String, String>>[]},
+        growable: false,
+      );
+      final comicPredictions = ComicPredictions(pagePredictions: []);
+
+      for (int i = 0; i < totalFiles; i++) {
+        checkCancellation();
+        final file = imageFiles[i];
+        final filename = path.basename(file.name);
+        final innerFilePath = '$comicRootPath/$filename';
+        debugPrint('Processing page ${i + 1}/$totalFiles: $filename');
+
+        final imageBytes = Uint8List.fromList(file.content as List<int>);
+        final base64Image = base64Encode(imageBytes);
+
+        // 1. Upload
+        final ref = _storage.ref(innerFilePath);
+        await ref.putData(imageBytes);
+        final downloadUrl = await ref.getDownloadURL();
+        pageUrls.add(downloadUrl);
+
+        // 2. Analyze
+        try {
+          final analysis = await _analyzePage(base64Image);
+
+          // Save Page Summaries
+          pageSummaries[i] = analysis['summaries'] as Map<String, String>;
+
+          // Save Panels & Panel Summaries
+          if (analysis.containsKey('panels')) {
+            final panelsList = analysis['panels'] as List<Panel>;
+            final predictions = Predictions(panels: panelsList);
+            comicPredictions.pagePredictions.add(predictions);
+
+            // Extract Panel Summaries
+            final List<Map<String, String>> panelSummaryMaps =
+                analysis['panel_summaries'] as List<Map<String, String>>;
+            panelSummaries[i] = {'panels': panelSummaryMaps};
+          } else {
+            comicPredictions.pagePredictions.add(Predictions(panels: []));
+          }
+        } catch (e) {
+          debugPrint('Fatal error analyzing page $i: $e');
+          rethrow; // Surface to the user immediately
+        }
+
+        // 3. Progress
+        final progress = (i + 1) / totalFiles;
+        progressStream.add(progress);
+      }
 
       // Generate & upload thumbnail
       await _createThumbnail(
@@ -186,149 +238,20 @@ class ComicImporter {
       );
       checkCancellation();
 
-      // Save comic to Firestore
-      await _saveComic(
-        userId: userId,
-        comicId: comicId,
-        thumbnailUrl: '$userRootPath/thumbnails/$comicId.jpg',
-        pageUrls: pageUrls,
+      // Save complete comic to Firestore
+      final comic = Comic(
+        id: comicId,
+        title: comicId,
+        thumbnailImage: '$userRootPath/thumbnails/$comicId.jpg',
+        pageCount: pageUrls.length,
+        pageImages: pageUrls,
+        predictions: comicPredictions,
+        pageSummaries: pageSummaries,
+        panelSummaries: panelSummaries,
       );
 
-      // Phase 2: Predictions => 70% .. 85%
-      var comic = await _repository.getComicById(userId, comicId);
-      if (enablePredictions) {
-        try {
-          final accessToken = await getGoogleAccessToken();
-          if (accessToken != null) {
-            final totalPages = comic.pageImages.length;
-            for (int i = 0; i < totalPages; i++) {
-              checkCancellation();
-              final imageUrl = comic.pageImages[i];
-              try {
-                final predictionsJson = await pred_utils.getPanelsREST(
-                  accessToken: accessToken,
-                  imageUrl: imageUrl,
-                  confidenceThreshold: 0.3,
-                  maxPredictions: 16,
-                );
-                final predictions = Predictions.fromJson(predictionsJson);
-                comic.predictions ??= ComicPredictions(pagePredictions: []);
-                comic.predictions!.pagePredictions.add(predictions);
-              } catch (e) {
-                debugPrint('Error fetching predictions for page $i: $e');
-                rethrow;
-              }
-
-              final subFraction = (i + 1) / totalPages;
-              final scaled = 0.70 + (0.85 - 0.70) * subFraction;
-              progressStream.add(scaled);
-
-              // Save progress
-              await _repository.updateComic(userId, comic);
-            }
-          }
-        } catch (authError) {
-          debugPrint('Predictions failed due to auth issue: $authError');
-          rethrow;
-        }
-      }
-      checkCancellation();
-
-      // Phase 3: Summaries => 85% .. 100%
-      comic = await _repository.getComicById(userId, comicId);
-      final totalSummaryPages = comic.pageImages.length;
-
-      // Initialize structures if not already there
-      comic.pageSummaries ??=
-          List.generate(totalSummaryPages, (_) => {}, growable: false);
-      comic.panelSummaries ??= List.generate(
-          totalSummaryPages, (_) => {'panels': <Map<String, String>>[]},
-          growable: false);
-
-      for (int i = 0; i < totalSummaryPages; i++) {
-        checkCancellation();
-
-        // Skip if already summarized (partial resume)
-        if (comic.pageSummaries![i].isNotEmpty) continue;
-
-        final imageUrl = comic.pageImages[i];
-
-        try {
-          // Download image once for both page and panel summaries
-          final response = await http.get(Uri.parse(imageUrl));
-          if (response.statusCode == 200) {
-            final imageBytes = response.bodyBytes;
-            final base64Image = base64Encode(imageBytes);
-
-            // 1. Page Summary
-            final pageSummaryMap = await _generateSummary(base64Image, 'page');
-            comic.pageSummaries![i] = pageSummaryMap;
-
-            // 2. Panel Summaries
-            // Check if we have panels for this page
-            if (comic.predictions != null &&
-                i < comic.predictions!.pagePredictions.length) {
-              final pagePreds = comic.predictions!.pagePredictions[i];
-              final panels = pagePreds.panels;
-
-              if (panels.isNotEmpty) {
-                final decodedImage = img.decodeImage(imageBytes);
-                if (decodedImage != null) {
-                  final List<Map<String, String>> panelMaps = [];
-
-                  for (final panel in panels) {
-                    // Crop panel
-                    final x =
-                        (panel.normalizedBox.left * decodedImage.width).round();
-                    final y =
-                        (panel.normalizedBox.top * decodedImage.height).round();
-                    final w = (panel.normalizedBox.width * decodedImage.width)
-                        .round();
-                    final h = (panel.normalizedBox.height * decodedImage.height)
-                        .round();
-
-                    // Boundary checks
-                    final safeX = x.clamp(0, decodedImage.width - 1);
-                    final safeY = y.clamp(0, decodedImage.height - 1);
-                    final safeW = (w + safeX > decodedImage.width)
-                        ? decodedImage.width - safeX
-                        : w;
-                    final safeH = (h + safeY > decodedImage.height)
-                        ? decodedImage.height - safeY
-                        : h;
-
-                    if (safeW > 0 && safeH > 0) {
-                      final crop = img.copyCrop(decodedImage,
-                          x: safeX, y: safeY, width: safeW, height: safeH);
-                      final cropBytes = img.encodeJpg(crop);
-                      final base64Crop = base64Encode(cropBytes);
-
-                      final panelSummaryMap =
-                          await _generateSummary(base64Crop, 'panel');
-                      panelMaps.add(panelSummaryMap);
-                    } else {
-                      panelMaps.add({});
-                    }
-                  }
-                  comic.panelSummaries![i] = {'panels': panelMaps};
-                }
-              }
-            }
-          }
-
-          // Save progress after each page's summary
-          await _repository.updateComic(userId, comic);
-        } catch (e) {
-          debugPrint('Error summarizing page $i: $e');
-          rethrow;
-        }
-
-        final subFraction = (i + 1) / totalSummaryPages;
-        final scaled = 0.85 + (1.0 - 0.85) * subFraction;
-        progressStream.add(scaled);
-      }
-      // Final update at the end
-      await _repository.updateComic(userId, comic);
+      await _repository.addComic(userId, comic);
+      debugPrint('Comic saved to Firestore: $comicId');
 
       return comicId;
     } catch (e) {
@@ -351,12 +274,15 @@ class ComicImporter {
 
   /// Helper for both Zip and Rar lists
   List<zip.ArchiveFile> _extractImagesFromArchiveList(
-      List<zip.ArchiveFile> files) {
+    List<zip.ArchiveFile> files,
+  ) {
     final imageFiles = files
-        .where((file) =>
-            file.isFile &&
-            !_shouldSkipFile(file.name.toLowerCase()) &&
-            _isAllowedExtension(file.name.toLowerCase()))
+        .where(
+          (file) =>
+              file.isFile &&
+              !_shouldSkipFile(file.name.toLowerCase()) &&
+              _isAllowedExtension(file.name.toLowerCase()),
+        )
         .toList();
 
     imageFiles.sort(
@@ -379,49 +305,6 @@ class ComicImporter {
     return _allowedExtensions.contains(extension);
   }
 
-  /// Uploads image files to Firebase Storage and returns their download URLs.
-  ///
-  /// [startFrac] and [endFrac] define how to scale the fraction
-  /// of this upload sub-task into the overall 0..1 range.
-  Future<List<String>> _uploadFilesScaled({
-    required List<zip.ArchiveFile> imageFiles,
-    required String comicRootPath,
-    required StreamController<double> progressStream,
-    required double startFrac,
-    required double endFrac,
-    required bool Function() isCancelled,
-  }) async {
-    final pageUrls = <String>[];
-    final totalFiles = imageFiles.length;
-    if (totalFiles == 0) {
-      return pageUrls;
-    }
-
-    for (int i = 0; i < totalFiles; i++) {
-      if (isCancelled()) {
-        throw Exception('Import cancelled');
-      }
-      final file = imageFiles[i];
-      final filename = path.basename(file.name);
-      final innerFilePath = '$comicRootPath/$filename';
-      debugPrint('Uploading: $innerFilePath');
-
-      final data = Uint8List.fromList(file.content as List<int>);
-      final ref = _storage.ref(innerFilePath);
-
-      await ref.putData(data);
-      final downloadUrl = await ref.getDownloadURL();
-      pageUrls.add(downloadUrl);
-
-      // partial progress for this sub-task from startFrac..endFrac
-      final subFraction = (i + 1) / totalFiles; // 0..1
-      final scaled = startFrac + (endFrac - startFrac) * subFraction;
-      progressStream.add(scaled);
-    }
-
-    return pageUrls;
-  }
-
   /// Creates a thumbnail from the first image file and uploads it.
   Future<void> _createThumbnail(
     zip.ArchiveFile firstImageFile,
@@ -433,16 +316,18 @@ class ComicImporter {
     }
 
     debugPrint('Creating thumbnail for: $thumbnailPath');
-    final originalImageData =
-        Uint8List.fromList(firstImageFile.content as List<int>);
+    final originalImageData = Uint8List.fromList(
+      firstImageFile.content as List<int>,
+    );
     final originalImage = img.decodeImage(originalImageData);
     if (originalImage == null) {
       throw Exception('Failed to decode first image for thumbnail.');
     }
 
     final resizedThumbnail = img.copyResize(originalImage, width: 200);
-    final thumbnailBytes =
-        Uint8List.fromList(img.encodeJpg(resizedThumbnail, quality: 85));
+    final thumbnailBytes = Uint8List.fromList(
+      img.encodeJpg(resizedThumbnail, quality: 85),
+    );
 
     if (isCancelled()) {
       throw Exception('Import cancelled');
@@ -453,107 +338,127 @@ class ComicImporter {
     debugPrint('Thumbnail uploaded: $thumbnailPath');
   }
 
-  /// Saves a newly imported Comic record to Firestore.
-  Future<void> _saveComic({
-    required String userId,
-    required String comicId,
-    required String thumbnailUrl,
-    required List<String> pageUrls,
-  }) async {
-    final comic = Comic(
-      id: comicId,
-      title: comicId,
-      thumbnailImage: thumbnailUrl,
-      pageCount: pageUrls.length,
-      pageImages: pageUrls,
-    );
-
-    await _repository.addComic(userId, comic);
-    debugPrint('Comic saved to Firestore: $comicId');
-  }
-
-  /// Generates a summary for a given image (page or panel) in multiple languages.
-  /// Returns a `Map<String, String>` with keys 'en', 'es', 'fr'.
-  Future<Map<String, String>> _generateSummary(
-      String base64Image, String contextType) async {
-    // Prompt adapted for context
-    final promptContext = contextType == 'panel'
-        ? 'panel of a comic book'
-        : 'page of a comic book';
-
-    final prompt =
-        'You are an expert OCR and translation model. Analyze this $promptContext. '
-        '1. Extract the text and arrange it narratively. '
-        '2. Summarize the story/content in three languages: English (en), Spanish (es), and French (fr). '
-        '3. Return ONLY a valid JSON object with keys "en", "es", "fr" and the respective summaries. '
-        'If no text/content, return empty strings.';
-
-    // 3) Request body
-    final apiKey = gemini_api_key.geminiApiKey;
-    if (apiKey.isEmpty) {
-      debugPrint('Gemini Error: API Key is missing or empty.');
-      return {'en': '', 'es': '', 'fr': ''};
-    }
-
-    final requestBody = {
-      'contents': [
-        {
-          'parts': [
-            {
-              'inline_data': {
-                'mime_type': 'image/jpeg',
-                'data': base64Image,
-              }
+  /// Analyzes a comic page using Gemini.
+  /// Returns a `Map<String, dynamic>` with:
+  /// - 'summaries': `Map<String, String>` (en, es, fr)
+  /// - 'panels': `List<Panel>`
+  /// - 'panel_summaries': `List<Map<String, String>>`
+  Future<Map<String, dynamic>> _analyzePage(String base64Image) async {
+    final responseSchema = Schema.object(
+      properties: {
+        'en': Schema.string(description: 'English summary of the page'),
+        'es': Schema.string(description: 'Spanish summary of the page'),
+        'fr': Schema.string(description: 'French summary of the page'),
+        'panels': Schema.array(
+          items: Schema.object(
+            properties: {
+              'box_2d': Schema.object(
+                properties: {
+                  'ymin': Schema.integer(description: 'Top coordinate 0-1000'),
+                  'xmin': Schema.integer(description: 'Left coordinate 0-1000'),
+                  'ymax': Schema.integer(
+                    description: 'Bottom coordinate 0-1000',
+                  ),
+                  'xmax': Schema.integer(
+                    description: 'Right coordinate 0-1000',
+                  ),
+                },
+              ),
+              'en': Schema.string(description: 'English summary of the panel'),
+              'es': Schema.string(description: 'Spanish summary of the panel'),
+              'fr': Schema.string(description: 'French summary of the panel'),
             },
-            {'text': prompt},
-          ]
-        }
-      ],
-      'generationConfig': {'responseMimeType': 'application/json'}
-    };
-
-    // 4) Call Gemini 1.5-flash
-    final endpoint =
-        'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=$apiKey';
-
-    debugPrint('Gemini Summary Request: ${jsonEncode(requestBody)}');
-    final llmResponse = await http.post(
-      Uri.parse(endpoint),
-      headers: {
-        HttpHeaders.contentTypeHeader: 'application/json',
+          ),
+        ),
       },
-      body: jsonEncode(requestBody),
     );
-    debugPrint(
-        'Gemini Summary Response: ${llmResponse.statusCode} - ${llmResponse.body}');
 
-    if (llmResponse.statusCode == 200) {
-      final jsonResponse = jsonDecode(llmResponse.body) as Map<String, dynamic>;
-      final candidate = jsonResponse['candidates']?[0];
-      final contentText = candidate['content']['parts'][0]['text'];
+    final schemaJson = jsonEncode(responseSchema.toJson());
 
-      if (contentText != null) {
-        try {
-          final parsed = jsonDecode(contentText);
-          if (parsed is Map) {
-            return {
-              'en': parsed['en']?.toString() ?? '',
-              'es': parsed['es']?.toString() ?? '',
-              'fr': parsed['fr']?.toString() ?? '',
-            };
-          }
-        } catch (e) {
-          debugPrint('Error parsing JSON summary: $e');
-          rethrow;
-        }
+    final systemInstruction = Content.system(
+      'You are an expert OCR and translation model specializing in comic books. '
+      'Your task is to analyze a comic book page and: \n'
+      '1. Extract the text and arrange it narratively. \n'
+      '2. Summarize the story/content in three languages: English (en), Spanish (es), and French (fr). \n'
+      '3. Detect all comic panels and provide their bounding boxes in normalized coordinates [0, 1000]. \n'
+      '4. Provide a narrative summary for each panel in the same three languages. \n'
+      '\n'
+      'IMPORTANT: You MUST return a valid JSON object strictly following this schema: \n'
+      '$schemaJson \n'
+      '\n'
+      'If no text or content is present, return empty strings for the summaries.',
+    );
+
+    final model = FirebaseAI.googleAI().generativeModel(
+      model: 'gemini-3-flash-preview',
+      systemInstruction: systemInstruction,
+      generationConfig: GenerationConfig(
+        responseMimeType: 'application/json',
+        responseSchema: responseSchema,
+      ),
+    );
+
+    try {
+      final response = await model.generateContent([
+        Content.multi([
+          InlineDataPart('image/jpeg', base64Decode(base64Image)),
+          TextPart('Analyze this comic page.'),
+        ]),
+      ]);
+
+      final contentText = response.text;
+      if (contentText == null) {
+        return {
+          'summaries': {'en': '', 'es': '', 'fr': ''},
+        };
       }
-    } else {
-      debugPrint(
-          'Request failed: ${llmResponse.statusCode} - ${llmResponse.body}');
-      throw Exception(
-          'Gemini request failed with status ${llmResponse.statusCode}: ${llmResponse.body}');
+
+      final parsed = jsonDecode(contentText) as Map<String, dynamic>;
+      final result = <String, dynamic>{
+        'summaries': {
+          'en': parsed['en']?.toString() ?? '',
+          'es': parsed['es']?.toString() ?? '',
+          'fr': parsed['fr']?.toString() ?? '',
+        },
+      };
+
+      if (parsed.containsKey('panels')) {
+        final List<dynamic> panelsJson = parsed['panels'] as List;
+        final List<Panel> panels = [];
+        final List<Map<String, String>> panelSummaries = [];
+
+        for (var j = 0; j < panelsJson.length; j++) {
+          final panelData = panelsJson[j] as Map<String, dynamic>;
+          final box = panelData['box_2d'] as Map<String, dynamic>;
+
+          final yMin = (box['ymin'] as num).toDouble() / 1000.0;
+          final xMin = (box['xmin'] as num).toDouble() / 1000.0;
+          final yMax = (box['ymax'] as num).toDouble() / 1000.0;
+          final xMax = (box['xmax'] as num).toDouble() / 1000.0;
+
+          panels.add(
+            Panel(
+              id: 'panel_$j',
+              displayName: 'panel',
+              confidence: 1.0,
+              normalizedBox: Rect.fromLTRB(xMin, yMin, xMax, yMax),
+            ),
+          );
+
+          panelSummaries.add({
+            'en': panelData['en']?.toString() ?? '',
+            'es': panelData['es']?.toString() ?? '',
+            'fr': panelData['fr']?.toString() ?? '',
+          });
+        }
+        result['panels'] = panels;
+        result['panel_summaries'] = panelSummaries;
+      }
+      return result;
+    } catch (e) {
+      debugPrint('Gemini Error: $e');
+      rethrow;
     }
-    return {'en': '', 'es': '', 'fr': ''};
   }
 
   /// Deletes partial upload if import is cancelled or error.

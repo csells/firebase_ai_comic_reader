@@ -1,5 +1,3 @@
-// TODO: 241229: Disable slider for panel-by-panel mode
-
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:comic_reader/data/comic_repository_firebase.dart';
 import 'package:comic_reader/models/comic.dart';
@@ -12,14 +10,12 @@ class ReaderView extends StatefulWidget {
   final Comic comic;
   final String userId;
   final String? firebaseAuthToken;
-  final String? googleAccessToken;
 
   const ReaderView({
     super.key,
     required this.comic,
     required this.userId,
     this.firebaseAuthToken,
-    this.googleAccessToken,
   });
 
   @override
@@ -38,10 +34,6 @@ class ReaderViewState extends State<ReaderView> {
   /// Which panel (0-based index) we’re currently focused on in smart mode.
   int _currentPanelIndex = 0;
 
-  // TODO: 241224: Decide on whether to move to first panel on load (it used to
-  // go to the last panel when navigating backwards, and the first panel when
-  // navigating forwards).
-  //
   /// Flag: If we jump to a new page in smart mode, do we go to the first or last panel?
   bool? _goToFirstPanelOnLoad;
 
@@ -126,11 +118,12 @@ class ReaderViewState extends State<ReaderView> {
     final Predictions? currentPagePredictions = widget.comic.predictions == null
         ? null
         : (widget.comic.predictions!.pagePredictions.length > _currentPageIndex
-            ? widget.comic.predictions!.pagePredictions[_currentPageIndex]
-            : null);
+              ? widget.comic.predictions!.pagePredictions[_currentPageIndex]
+              : null);
 
     // Grab the Gemini summary for the current page
-    final String? currentPageSummaryRaw = (widget.comic.pageSummaries != null &&
+    final String? currentPageSummaryRaw =
+        (widget.comic.pageSummaries != null &&
             _currentPageIndex < widget.comic.pageSummaries!.length)
         ? widget.comic.pageSummaries![_currentPageIndex][_selectedLanguage]
         : null;
@@ -152,8 +145,9 @@ class ReaderViewState extends State<ReaderView> {
       }
     }
 
-    final displayedSummary =
-        _smartMode ? currentPanelSummaryRaw : currentPageSummaryRaw;
+    final displayedSummary = _smartMode
+        ? currentPanelSummaryRaw
+        : currentPageSummaryRaw;
 
     return Scaffold(
       appBar: AppBar(
@@ -205,7 +199,8 @@ class ReaderViewState extends State<ReaderView> {
                   builder: (context) => AlertDialog(
                     title: const Text('Delete Comic'),
                     content: const Text(
-                        'Are you sure you want to delete this comic?'),
+                      'Are you sure you want to delete this comic?',
+                    ),
                     actions: [
                       TextButton(
                         onPressed: () => Navigator.pop(context, false),
@@ -213,16 +208,18 @@ class ReaderViewState extends State<ReaderView> {
                       ),
                       TextButton(
                         onPressed: () => Navigator.pop(context, true),
-                        child: const Text('Delete',
-                            style: TextStyle(color: Colors.red)),
+                        child: const Text(
+                          'Delete',
+                          style: TextStyle(color: Colors.red),
+                        ),
                       ),
                     ],
                   ),
                 );
 
-                if (confirmed == true && mounted) {
+                if (context.mounted && confirmed == true) {
                   await _repository.deleteComic(widget.userId, widget.comic.id);
-                  if (mounted) {
+                  if (context.mounted) {
                     Navigator.pop(context); // Go back to library
                   }
                 }
@@ -322,23 +319,29 @@ class ReaderViewState extends State<ReaderView> {
               Container(
                 width: double.infinity,
                 color: _smartMode ? Colors.blue[50] : Colors.grey[200],
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 12,
+                ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     if (_smartMode)
                       Row(
                         children: [
-                          const Icon(Icons.science,
-                              color: Colors.blue, size: 14),
+                          const Icon(
+                            Icons.science,
+                            color: Colors.blue,
+                            size: 14,
+                          ),
                           const SizedBox(width: 4),
                           const Text(
                             'SMART MODE ACTIVE',
                             style: TextStyle(
-                                fontSize: 10,
-                                fontWeight: FontWeight.bold,
-                                color: Colors.blue),
+                              fontSize: 10,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.blue,
+                            ),
                           ),
                           const Spacer(),
                           if (currentPagePredictions == null ||
@@ -354,11 +357,11 @@ class ReaderViewState extends State<ReaderView> {
                       displayedSummary?.isNotEmpty == true
                           ? displayedSummary!
                           : (_smartMode
-                              ? (currentPagePredictions == null ||
-                                      currentPagePredictions.panels.isEmpty
-                                  ? 'Summaries unavailable because panel detection failed for this page.'
-                                  : 'No specific summary for this panel.')
-                              : 'No page summary available. (Did the import finish?)'),
+                                ? (currentPagePredictions == null ||
+                                          currentPagePredictions.panels.isEmpty
+                                      ? 'Summaries unavailable because panel detection failed for this page.'
+                                      : 'No specific summary for this panel.')
+                                : 'No page summary available. (Did the import finish?)'),
                       style: TextStyle(
                         fontSize: 14,
                         color: displayedSummary?.isNotEmpty == true
@@ -386,11 +389,8 @@ class ReaderViewState extends State<ReaderView> {
                 divisions: widget.comic.pageCount! - 1,
                 label: (_currentPageIndex + 1).toString(),
                 onChanged: (value) {
-                  // Only allow direct page-jumping if we’re NOT in smart mode
-                  if (!_smartMode) {
-                    _pageController.jumpToPage(value.round());
-                    _onPageChanged(value.round());
-                  }
+                  _pageController.jumpToPage(value.round());
+                  _onPageChanged(value.round());
                 },
               ),
             ),
@@ -405,8 +405,8 @@ class ReaderViewState extends State<ReaderView> {
     final Predictions? currentPreds = widget.comic.predictions == null
         ? null
         : (widget.comic.predictions!.pagePredictions.length > _currentPageIndex
-            ? widget.comic.predictions!.pagePredictions[_currentPageIndex]
-            : null);
+              ? widget.comic.predictions!.pagePredictions[_currentPageIndex]
+              : null);
     final int totalPanels = currentPreds?.panels.length ?? 0;
 
     if (_smartMode && currentPreds != null && totalPanels > 0) {
@@ -442,8 +442,8 @@ class ReaderViewState extends State<ReaderView> {
     final Predictions? currentPreds = widget.comic.predictions == null
         ? null
         : (widget.comic.predictions!.pagePredictions.length > _currentPageIndex
-            ? widget.comic.predictions!.pagePredictions[_currentPageIndex]
-            : null);
+              ? widget.comic.predictions!.pagePredictions[_currentPageIndex]
+              : null);
     final int totalPanels = currentPreds?.panels.length ?? 0;
 
     if (_smartMode && currentPreds != null && totalPanels > 0) {

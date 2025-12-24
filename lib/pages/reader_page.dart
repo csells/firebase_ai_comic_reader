@@ -1,16 +1,13 @@
 // ignore_for_file: use_build_context_synchronously
 
+import 'package:comic_reader/data/comic_repository_firebase.dart';
+import 'package:comic_reader/models/comic.dart';
+import 'package:comic_reader/utils/auth_utils.dart' as auth_utils;
 import 'package:flutter/material.dart';
 
 import '../views/reader_view.dart';
-import 'package:comic_reader/models/comic.dart';
-import 'package:comic_reader/data/comic_repository_firebase.dart';
-
-import 'package:comic_reader/utils/auth_utils.dart' as auth_utils;
 //import 'package:comic_reader/utils/prediction_utils.dart' as prediction_utils;
 
-// TODO: On load, iterate through comic images and send them to the prediction
-// API. Also, consider just processing the current page while testing:
 class ReaderPage extends StatefulWidget {
   final String comicId;
   final String userId;
@@ -33,12 +30,6 @@ class ReaderPageState extends State<ReaderPage> {
     _initializeFirebaseToken();
   }
 
-  // TODO: 241224: GET FIREBASE AUTH TOKEN! We do NOT need Google Auth scope
-  // here! In fact, it damages the user experience. The Google Auth scope is
-  // only for the prediction API while calling the model, which is only done
-  // during the comic import process. Therefore, we need to get the Firebase
-  // Auth token instead! #VeryImportant #FirebaseAuth #FirebaseToken
-  //
   // Create separate async method for token initialization
   Future<void> _initializeFirebaseToken() async {
     firebaseAuthToken = auth_utils.getFirebaseAuthToken();
@@ -72,7 +63,8 @@ class ReaderPageState extends State<ReaderPage> {
                 );
               } else {
                 debugPrint(
-                    'ReaderPage: Firebase Auth Token: ${tokenSnapshot.data}');
+                  'ReaderPage: Firebase Auth Token: ${tokenSnapshot.data}',
+                );
                 return ReaderView(
                   comic: snapshot.data!,
                   userId: widget.userId,

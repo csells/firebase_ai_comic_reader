@@ -170,13 +170,9 @@ class _LibraryPageState extends State<LibraryPage> {
         }
 
         if (context.mounted) {
-          _showProgressDialog(
-            context,
-            progressStream.stream,
-            () {
-              cancelCompleter.complete();
-            },
-          );
+          _showProgressDialog(context, progressStream.stream, () {
+            cancelCompleter.complete();
+          });
           dialogShown = true;
         }
 
@@ -317,8 +313,10 @@ class _LibraryPageState extends State<LibraryPage> {
                   onTap: () {
                     // Navigate to Reader
                     if (context.mounted) {
-                      context.goNamed('reader',
-                          pathParameters: {'comicId': comicId});
+                      context.goNamed(
+                        'reader',
+                        pathParameters: {'comicId': comicId},
+                      );
                     }
                   },
                   onLongPress: () {
@@ -333,14 +331,17 @@ class _LibraryPageState extends State<LibraryPage> {
                 right: 0,
                 child: Container(
                   decoration: BoxDecoration(
-                    color: Colors.black.withOpacity(0.5),
+                    color: Colors.black.withValues(alpha: 0.5),
                     borderRadius: const BorderRadius.only(
                       bottomLeft: Radius.circular(8),
                     ),
                   ),
                   child: IconButton(
-                    icon:
-                        const Icon(Icons.delete, color: Colors.white, size: 20),
+                    icon: const Icon(
+                      Icons.delete,
+                      color: Colors.white,
+                      size: 20,
+                    ),
                     tooltip: 'Delete Comic',
                     onPressed: () {
                       _showDeleteConfirmationDialog(comicId);

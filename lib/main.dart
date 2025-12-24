@@ -1,45 +1,37 @@
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
-import 'package:firebase_auth/firebase_auth.dart';
-import 'package:firebase_core/firebase_core.dart';
-import 'package:firebase_ui_auth/firebase_ui_auth.dart';
-import 'package:firebase_ui_oauth_google/firebase_ui_oauth_google.dart';
-
 import 'firebase_options.dart';
 import 'pages/library_page.dart';
+import 'pages/login_page.dart';
 import 'pages/reader_page.dart';
-
-// This file has to be manually created. It's excluded from the git
-// repository to avoid leaking your client ID.See the README.md for details.
-import 'google_client_id.dart' as google_client_id;
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   final firebaseOptions = DefaultFirebaseOptions.currentPlatform;
   await Firebase.initializeApp(options: firebaseOptions);
 
-  FirebaseUIAuth.configureProviders([
-    GoogleProvider(
-      clientId: google_client_id.googleClientId,
-    ),
-  ]);
-
   runApp(const App());
 }
 
+/// A listenable that triggers whenever the Firebase Auth state changes.
+class AuthRefreshListenable extends ChangeNotifier {
+  AuthRefreshListenable() {
+    FirebaseAuth.instance.authStateChanges().listen((_) {
+      notifyListeners();
+    });
+  }
+}
+
 final GoRouter _router = GoRouter(
+  refreshListenable: AuthRefreshListenable(),
   routes: [
     GoRoute(
       name: 'sign-in',
       path: '/sign-in',
-      builder: (context, state) => SignInScreen(
-        actions: [
-          AuthStateChangeAction<SignedIn>((context, state) {
-            context.goNamed('library');
-          }),
-        ],
-      ),
+      builder: (context, state) => const LoginPage(),
     ),
     GoRoute(
       name: 'library',
@@ -83,9 +75,7 @@ class App extends StatelessWidget {
     return MaterialApp.router(
       routerConfig: _router,
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        primarySwatch: Colors.blue,
-      ),
+      theme: ThemeData(primarySwatch: Colors.blue),
     );
   }
 }
