@@ -1,3 +1,5 @@
+// ignore_for_file: avoid_dynamic_calls
+
 import 'predictions.dart';
 
 class Comic {
@@ -28,7 +30,6 @@ class Comic {
         ? DateTime.parse(map['lastReadDate'])
         : null,
     pageImages: List<String>.from(map['pageImages'] ?? []),
-    // Same Firestore structure: predictions.pagePredictions
     predictions: (map['predictions']?['pagePredictions'] as List? ?? [])
         .map((m) => Predictions.fromMap(m as Map<String, dynamic>))
         .toList(),

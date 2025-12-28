@@ -64,10 +64,6 @@ final GoRouter _router = GoRouter(
   },
 );
 
-/// The root widget of the Comic Reader application.
-///
-/// This widget sets up the MaterialApp with routing configuration and theme
-/// settings.
 class App extends StatelessWidget {
   const App({super.key});
 
@@ -75,6 +71,5 @@ class App extends StatelessWidget {
   Widget build(BuildContext context) => MaterialApp.router(
     routerConfig: _router,
     debugShowCheckedModeBanner: false,
-    theme: ThemeData(primarySwatch: Colors.blue),
   );
 }
