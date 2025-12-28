@@ -2,7 +2,7 @@ import 'dart:typed_data';
 
 import 'package:archive/archive.dart' as zip;
 
-import 'rar_extractor_interface.dart';
+import 'rar_extractor.dart';
 
 class RarExtractorImpl implements RarExtractor {
   @override

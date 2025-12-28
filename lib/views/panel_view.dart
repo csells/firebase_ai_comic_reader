@@ -2,26 +2,26 @@ import 'dart:async';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 
-import 'package:comic_reader/models/panel.dart';
 import 'package:flutter/material.dart';
+
+import '../models/panel.dart';
 
 // When true, panel bounding boxes are drawn in red around panels. This is
 // useful for testing the accuracy of your object detection model.
 const bool kDebugPanelBoundaries = false;
 
 class PanelView extends StatefulWidget {
-  final String imageUrl;
-  final List<Panel> panels;
-  final int currentPanelIndex;
-  final bool panelMode;
-
   const PanelView({
-    super.key,
     required this.imageUrl,
     required this.panels,
     required this.currentPanelIndex,
     required this.panelMode,
+    super.key,
   });
+  final String imageUrl;
+  final List<Panel> panels;
+  final int currentPanelIndex;
+  final bool panelMode;
 
   @override
   State<PanelView> createState() => _PanelViewState();
@@ -38,7 +38,7 @@ class _PanelViewState extends State<PanelView> {
   @override
   void initState() {
     super.initState();
-    _loadUiImage();
+    unawaited(_loadUiImage());
   }
 
   @override
@@ -61,7 +61,7 @@ class _PanelViewState extends State<PanelView> {
       final completer = Completer<ui.Image>();
       final stream = Image.network(
         widget.imageUrl,
-      ).image.resolve(const ImageConfiguration());
+      ).image.resolve(ImageConfiguration.empty);
       late final ImageStreamListener listener;
 
       listener = ImageStreamListener(
@@ -88,15 +88,16 @@ class _PanelViewState extends State<PanelView> {
       });
 
       // Prepare panels for display
-      for (var panel in widget.panels) {
+      for (final panel in widget.panels) {
         panel.convertToImageCoordinates(imageWidth, imageHeight);
       }
 
       if (widget.panelMode) {
         _scheduleJump();
       }
-    } catch (e) {
+    } on Exception catch (e) {
       debugPrint('PanelView: Error loading image: $e');
+      rethrow;
     }
   }
 
@@ -120,7 +121,7 @@ class _PanelViewState extends State<PanelView> {
       return;
     }
 
-    const double padding = 32.0;
+    const padding = 32;
     final viewWidth = _viewSize!.width - 2 * padding;
     final viewHeight = _viewSize!.height - 2 * padding;
 
@@ -136,55 +137,52 @@ class _PanelViewState extends State<PanelView> {
     final ty = (viewHeight / 2) - (panelCenterY * scale);
 
     _transformationController.value = Matrix4.identity()
-      ..setTranslationRaw(tx, ty, 0.0)
-      ..scaleByDouble(scale, scale, scale, 1.0);
+      ..setTranslationRaw(tx, ty, 0)
+      ..scaleByDouble(scale, scale, scale, 1);
   }
 
   @override
-  Widget build(BuildContext context) {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final newViewSize = Size(constraints.maxWidth, constraints.maxHeight);
-        if (_viewSize != newViewSize) {
-          _viewSize = newViewSize;
-          if (widget.panelMode) {
-            _scheduleJump();
-          }
+  Widget build(BuildContext context) => LayoutBuilder(
+    builder: (context, constraints) {
+      final newViewSize = Size(constraints.maxWidth, constraints.maxHeight);
+      if (_viewSize != newViewSize) {
+        _viewSize = newViewSize;
+        if (widget.panelMode) {
+          _scheduleJump();
         }
+      }
 
-        if (_uiImage == null || _imageSize == null) {
-          return const Center(child: CircularProgressIndicator());
-        }
+      if (_uiImage == null || _imageSize == null) {
+        return const Center(child: CircularProgressIndicator());
+      }
 
-        return Container(
-          color: Theme.of(context).scaffoldBackgroundColor,
-          child: Padding(
-            padding: const EdgeInsets.all(32.0),
-            child: InteractiveViewer(
-              transformationController: _transformationController,
-              minScale: 1.0,
-              maxScale: 5.0,
-              boundaryMargin: const EdgeInsets.all(2000),
-              clipBehavior: Clip.none,
-              constrained: false,
-              child: CustomPaint(
-                size: _imageSize!,
-                painter: widget.panelMode
-                    ? _buildSmartModePainter(
-                        Theme.of(context).scaffoldBackgroundColor,
-                      )
-                    : _buildNormalModePainter(),
-              ),
+      return ColoredBox(
+        color: Theme.of(context).scaffoldBackgroundColor,
+        child: Padding(
+          padding: const EdgeInsets.all(32),
+          child: InteractiveViewer(
+            transformationController: _transformationController,
+            minScale: 1,
+            maxScale: 5,
+            boundaryMargin: const EdgeInsets.all(2000),
+            clipBehavior: Clip.none,
+            constrained: false,
+            child: CustomPaint(
+              size: _imageSize!,
+              painter: widget.panelMode
+                  ? _buildSmartModePainter(
+                      Theme.of(context).scaffoldBackgroundColor,
+                    )
+                  : _buildNormalModePainter(),
             ),
           ),
-        );
-      },
-    );
-  }
+        ),
+      );
+    },
+  );
 
-  CustomPainter _buildNormalModePainter() {
-    return PanelImagePainter(uiImage: _uiImage!, panels: widget.panels);
-  }
+  CustomPainter _buildNormalModePainter() =>
+      PanelImagePainter(uiImage: _uiImage!, panels: widget.panels);
 
   CustomPainter _buildSmartModePainter(Color backgroundColor) {
     if (widget.panels.isEmpty ||
@@ -203,10 +201,9 @@ class _PanelViewState extends State<PanelView> {
 }
 
 class PanelImagePainter extends CustomPainter {
+  PanelImagePainter({required this.uiImage, required this.panels});
   final ui.Image uiImage;
   final List<Panel> panels;
-
-  PanelImagePainter({required this.uiImage, required this.panels});
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -228,21 +225,19 @@ class PanelImagePainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant PanelImagePainter oldDelegate) {
-    return oldDelegate.uiImage != uiImage || oldDelegate.panels != panels;
-  }
+  bool shouldRepaint(covariant PanelImagePainter oldDelegate) =>
+      oldDelegate.uiImage != uiImage || oldDelegate.panels != panels;
 }
 
 class SmartPanelImagePainter extends CustomPainter {
-  final ui.Image uiImage;
-  final Rect panelRect;
-  final Color backgroundColor;
-
   SmartPanelImagePainter({
     required this.uiImage,
     required this.panelRect,
     required this.backgroundColor,
   });
+  final ui.Image uiImage;
+  final Rect panelRect;
+  final Color backgroundColor;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -272,7 +267,6 @@ class SmartPanelImagePainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant SmartPanelImagePainter oldDelegate) {
-    return oldDelegate.uiImage != uiImage || oldDelegate.panelRect != panelRect;
-  }
+  bool shouldRepaint(covariant SmartPanelImagePainter oldDelegate) =>
+      oldDelegate.uiImage != uiImage || oldDelegate.panelRect != panelRect;
 }

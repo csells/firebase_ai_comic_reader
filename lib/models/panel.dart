@@ -1,27 +1,12 @@
 import 'dart:ui';
 
-/// Represents a detected panel in a comic page, with both normalized and pixel-based coordinates.
+/// Represents a detected panel in a comic page, with both normalized and
+/// pixel-based coordinates.
 ///
-/// A panel is a rectangular region in a comic page that contains a single scene or frame.
-/// The coordinates can be represented in both normalized form (0.0 to 1.0) and pixel form.
+/// A panel is a rectangular region in a comic page that contains a single scene
+/// or frame. The coordinates can be represented in both normalized form (0.0 to
+/// 1.0) and pixel form.
 class Panel {
-  /// Unique identifier for the panel.
-  final String id;
-
-  /// Display name or label for the panel (e.g., "panel").
-  final String displayName;
-
-  /// Confidence score of the panel detection (0.0 to 1.0).
-  final double confidence;
-
-  /// Normalized bounding box coordinates (values between 0.0 and 1.0).
-  /// [left, top, right, bottom]
-  final Rect normalizedBox;
-
-  /// Optional pixel-based bounding box coordinates.
-  /// This is typically derived from [normalizedBox] and image dimensions.
-  Rect? pixelBox;
-
   Panel({
     required this.id,
     required this.displayName,
@@ -29,12 +14,6 @@ class Panel {
     required this.normalizedBox,
     this.pixelBox,
   });
-
-  /// The horizontal center of the panel in normalized coordinates.
-  double get normalizedCenterX => normalizedBox.left + normalizedBox.width / 2;
-
-  /// The vertical center of the panel in normalized coordinates.
-  double get normalizedCenterY => normalizedBox.top + normalizedBox.height / 2;
 
   factory Panel.fromJson(Map<String, dynamic> json) {
     final bbox = (json['bbox'] as List)
@@ -52,37 +31,6 @@ class Panel {
         bbox[3], // yMax
       ),
     );
-  }
-
-  /// Converts the normalized coordinates to pixel coordinates for a given image size.
-  void convertToImageCoordinates(double imageWidth, double imageHeight) {
-    pixelBox = Rect.fromLTRB(
-      normalizedBox.left * imageWidth,
-      normalizedBox.top * imageHeight,
-      normalizedBox.right * imageWidth,
-      normalizedBox.bottom * imageHeight,
-    );
-  }
-
-  Map<String, dynamic> toMap() {
-    return {
-      'id': id,
-      'displayName': displayName,
-      'confidence': confidence,
-      'normalizedBox': {
-        'left': normalizedBox.left,
-        'top': normalizedBox.top,
-        'right': normalizedBox.right,
-        'bottom': normalizedBox.bottom,
-      },
-      if (pixelBox != null)
-        'pixelBox': {
-          'left': pixelBox!.left,
-          'top': pixelBox!.top,
-          'right': pixelBox!.right,
-          'bottom': pixelBox!.bottom,
-        },
-    };
   }
 
   factory Panel.fromMap(Map<String, dynamic> map) {
@@ -109,6 +57,59 @@ class Panel {
             ),
     );
   }
+
+  /// Unique identifier for the panel.
+  final String id;
+
+  /// Display name or label for the panel (e.g., "panel").
+  final String displayName;
+
+  /// Confidence score of the panel detection (0.0 to 1.0).
+  final double confidence;
+
+  /// Normalized bounding box coordinates (values between 0.0 and 1.0). [left,
+  /// top, right, bottom]
+  final Rect normalizedBox;
+
+  /// Optional pixel-based bounding box coordinates. This is typically derived
+  /// from [normalizedBox] and image dimensions.
+  Rect? pixelBox;
+
+  /// The horizontal center of the panel in normalized coordinates.
+  double get normalizedCenterX => normalizedBox.left + normalizedBox.width / 2;
+
+  /// The vertical center of the panel in normalized coordinates.
+  double get normalizedCenterY => normalizedBox.top + normalizedBox.height / 2;
+
+  /// Converts the normalized coordinates to pixel coordinates for a given image
+  /// size.
+  void convertToImageCoordinates(double imageWidth, double imageHeight) {
+    pixelBox = Rect.fromLTRB(
+      normalizedBox.left * imageWidth,
+      normalizedBox.top * imageHeight,
+      normalizedBox.right * imageWidth,
+      normalizedBox.bottom * imageHeight,
+    );
+  }
+
+  Map<String, dynamic> toMap() => {
+    'id': id,
+    'displayName': displayName,
+    'confidence': confidence,
+    'normalizedBox': {
+      'left': normalizedBox.left,
+      'top': normalizedBox.top,
+      'right': normalizedBox.right,
+      'bottom': normalizedBox.bottom,
+    },
+    if (pixelBox != null)
+      'pixelBox': {
+        'left': pixelBox!.left,
+        'top': pixelBox!.top,
+        'right': pixelBox!.right,
+        'bottom': pixelBox!.bottom,
+      },
+  };
 
   @override
   String toString() => 'Panel(id: $id, box: $normalizedBox)';

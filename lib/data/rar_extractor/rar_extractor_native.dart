@@ -6,7 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as path;
 import 'package:rar/rar.dart';
 
-import 'rar_extractor_interface.dart';
+import 'rar_extractor.dart';
 
 class RarExtractorImpl implements RarExtractor {
   @override
@@ -29,7 +29,7 @@ class RarExtractorImpl implements RarExtractor {
         throw Exception('RAR extraction failed: ${result['message']}');
       }
 
-      if (await extractDir.exists()) {
+      if (extractDir.existsSync()) {
         await for (final entity in extractDir.list(recursive: true)) {
           if (entity is File) {
             final filename = path.basename(entity.path);
@@ -48,7 +48,7 @@ class RarExtractorImpl implements RarExtractor {
         }
       }
     } finally {
-      if (await tempDir.exists()) {
+      if (tempDir.existsSync()) {
         await tempDir.delete(recursive: true);
       }
     }

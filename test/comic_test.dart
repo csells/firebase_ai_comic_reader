@@ -1,3 +1,5 @@
+// ignore_for_file: avoid_dynamic_calls
+
 import 'package:comic_reader/models/comic.dart';
 import 'package:flutter_test/flutter_test.dart';
 

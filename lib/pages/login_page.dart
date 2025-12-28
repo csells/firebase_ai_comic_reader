@@ -36,9 +36,11 @@ class _LoginPageState extends State<LoginPage> {
       debugPrint('Sign in successful for: $email');
     } on FirebaseAuthException catch (e) {
       debugPrint('Sign in failed: ${e.code}');
-      // 'user-not-found' is for older Firebase versions, 'invalid-credential' is the newer consolidated code.
+      // 'user-not-found' is for older Firebase versions, 'invalid-credential'
+      // is the newer consolidated code.
       if (e.code == 'user-not-found' || e.code == 'invalid-credential') {
-        // If user not found (or potentially invalid credentials), try to create the account.
+        // If user not found (or potentially invalid credentials), try to create
+        // the account.
         try {
           debugPrint('Attempting to create account for: $email');
           await _auth.createUserWithEmailAndPassword(
@@ -49,8 +51,9 @@ class _LoginPageState extends State<LoginPage> {
         } on FirebaseAuthException catch (createError) {
           debugPrint('Account creation failed: ${createError.code}');
           if (createError.code == 'email-already-in-use') {
-            // This happens if the original signIn failed with 'invalid-credential'
-            // but the user actually exists (wrong password).
+            // This happens if the original signIn failed with
+            // 'invalid-credential' but the user actually exists (wrong
+            // password).
             setState(() => _errorMessage = 'Invalid email or password.');
           } else {
             setState(() => _errorMessage = createError.message);
@@ -59,7 +62,7 @@ class _LoginPageState extends State<LoginPage> {
       } else {
         setState(() => _errorMessage = e.message);
       }
-    } catch (e) {
+    } on Exception catch (e) {
       debugPrint('Unexpected error during login: $e');
       setState(() => _errorMessage = 'An unexpected error occurred: $e');
     } finally {
@@ -70,76 +73,74 @@ class _LoginPageState extends State<LoginPage> {
   }
 
   @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Comic Reader Login')),
-      body: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 400),
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.all(24.0),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                const Icon(Icons.menu_book, size: 80, color: Colors.blue),
-                const SizedBox(height: 24),
-                const Text(
-                  'Welcome to AI Comic Reader',
-                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+  Widget build(BuildContext context) => Scaffold(
+    appBar: AppBar(title: const Text('Comic Reader Login')),
+    body: Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 400),
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Icon(Icons.menu_book, size: 80, color: Colors.blue),
+              const SizedBox(height: 24),
+              const Text(
+                'Welcome to AI Comic Reader',
+                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 32),
+              TextField(
+                controller: _emailController,
+                decoration: const InputDecoration(
+                  labelText: 'Email',
+                  prefixIcon: Icon(Icons.email),
+                  border: OutlineInputBorder(),
                 ),
-                const SizedBox(height: 32),
-                TextField(
-                  controller: _emailController,
-                  decoration: const InputDecoration(
-                    labelText: 'Email',
-                    prefixIcon: Icon(Icons.email),
-                    border: OutlineInputBorder(),
-                  ),
-                  onSubmitted: (_) => _handleLogin(),
-                  keyboardType: TextInputType.emailAddress,
-                  autocorrect: false,
+                onSubmitted: (_) => _handleLogin(),
+                keyboardType: TextInputType.emailAddress,
+                autocorrect: false,
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: _passwordController,
+                decoration: const InputDecoration(
+                  labelText: 'Password',
+                  prefixIcon: Icon(Icons.lock),
+                  border: OutlineInputBorder(),
                 ),
+                onSubmitted: (_) => _handleLogin(),
+                obscureText: true,
+                autocorrect: false,
+              ),
+              if (_errorMessage != null) ...[
                 const SizedBox(height: 16),
-                TextField(
-                  controller: _passwordController,
-                  decoration: const InputDecoration(
-                    labelText: 'Password',
-                    prefixIcon: Icon(Icons.lock),
-                    border: OutlineInputBorder(),
-                  ),
-                  onSubmitted: (_) => _handleLogin(),
-                  obscureText: true,
-                  autocorrect: false,
-                ),
-                if (_errorMessage != null) ...[
-                  const SizedBox(height: 16),
-                  Text(
-                    _errorMessage!,
-                    style: const TextStyle(color: Colors.red),
-                    textAlign: TextAlign.center,
-                  ),
-                ],
-                const SizedBox(height: 32),
-                SizedBox(
-                  width: double.infinity,
-                  height: 50,
-                  child: ElevatedButton(
-                    onPressed: _isLoading ? null : _handleLogin,
-                    child: _isLoading
-                        ? const CircularProgressIndicator()
-                        : const Text('Sign In', style: TextStyle(fontSize: 18)),
-                  ),
-                ),
-                const SizedBox(height: 16),
-                const Text(
-                  'New users will be registered automatically.',
-                  style: TextStyle(color: Colors.grey, fontSize: 12),
+                Text(
+                  _errorMessage!,
+                  style: const TextStyle(color: Colors.red),
+                  textAlign: TextAlign.center,
                 ),
               ],
-            ),
+              const SizedBox(height: 32),
+              SizedBox(
+                width: double.infinity,
+                height: 50,
+                child: ElevatedButton(
+                  onPressed: _isLoading ? null : _handleLogin,
+                  child: _isLoading
+                      ? const CircularProgressIndicator()
+                      : const Text('Sign In', style: TextStyle(fontSize: 18)),
+                ),
+              ),
+              const SizedBox(height: 16),
+              const Text(
+                'New users will be registered automatically.',
+                style: TextStyle(color: Colors.grey, fontSize: 12),
+              ),
+            ],
           ),
         ),
       ),
-    );
-  }
+    ),
+  );
 }

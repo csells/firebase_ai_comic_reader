@@ -1,13 +1,13 @@
 # Firebase AI Comic Reader
 
 A modern Flutter application for reading and analyzing comic books using Gemini
-AI. This app transforms traditional comic archives (.CBZ, .CBR) into an
+AI. This app transforms traditional comic archives (.cbz, .cbr) into an
 interactive, AI-enhanced reading experience.
 
-Need a sample comic to test with? Any cbr or cbz file will work. You can download
-some sample comics from [here](https://github.com/clach04/sample_reading_media).
+Need a sample comic to test with? Any cbr or cbz file will work. You can also
+check out the comics from the `comics-for-testing` directory in this repository.
 
-![reader screenshot](readme/screenshot.png)
+<video controls src="readme/screen-recording.mov" title="Title"></video>
 
 ## AI Features
 

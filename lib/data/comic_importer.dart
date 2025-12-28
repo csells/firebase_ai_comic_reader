@@ -8,7 +8,6 @@ import 'package:image/image.dart' as img;
 import 'package:path/path.dart' as path;
 
 import '../models/comic.dart';
-import '../models/comic_predictions.dart';
 import '../models/panel.dart';
 import '../models/predictions.dart';
 import 'comic_repository_firebase.dart';
@@ -16,12 +15,11 @@ import 'gemini_service.dart';
 import 'rar_extractor/rar_extractor.dart';
 
 class ComicImporter {
+  ComicImporter({this.enablePredictions = true});
   final fs.FirebaseStorage _storage = fs.FirebaseStorage.instance;
   final ComicRepositoryFirebase _repository = ComicRepositoryFirebase();
 
   final bool enablePredictions;
-
-  ComicImporter({this.enablePredictions = true});
 
   static const List<String> _ignoredPrefixes = [
     '.',
@@ -48,15 +46,16 @@ class ComicImporter {
   /// 2. Generate a unique comic ID based on filename.
   /// 3. Decompress and filter images.
   /// 4. Upload pages to Firebase Storage (cover 0%..70%).
-  /// 5. Generate & upload thumbnail (no extra progress shift, it finishes near 70%).
+  /// 5. Generate & upload thumbnail (no extra progress shift, it finishes near
+  ///    70%).
   /// 6. Save comic in Firestore (initial).
   /// 7. (Predictions) Fetch panel data for each page (cover 70%..85%).
   /// 8. (Summaries) Summarize each page (cover 85%..100%).
   ///
   /// If cancelled or on error, attempts cleanup.
   ///
-  /// The same [progressStream] is used for all phases. We simply
-  /// scale the fraction so the bar stays between 0 and 1 overall.
+  /// The same [progressStream] is used for all phases. We simply scale the
+  /// fraction so the bar stays between 0 and 1 overall.
   Future<String> importComic(
     Uint8List comicBytes,
     String fileName,
@@ -71,15 +70,15 @@ class ComicImporter {
     final baseName = path.basenameWithoutExtension(fileName);
     final comicId = baseName;
     final userId = user.uid;
-    final rootPath = 'comic_store';
+    const rootPath = 'comic_store';
     final userRootPath = '$rootPath/$userId';
     final comicRootPath = '$userRootPath/comics/$comicId';
     final thumbnailPath = '$userRootPath/thumbnails/$comicId.jpg';
 
     debugPrint('Importing comic: $comicId for user: $userId');
 
-    bool isCancelled = false;
-    cancelFuture.then((_) => isCancelled = true);
+    var isCancelled = false;
+    unawaited(cancelFuture.then((_) => isCancelled = true));
 
     void checkCancellation() {
       if (isCancelled) {
@@ -90,7 +89,7 @@ class ComicImporter {
     try {
       debugPrint('Decompressing comic archive: $fileName');
       // 1) Decompress archive
-      List<zip.ArchiveFile> imageFiles = [];
+      var imageFiles = <zip.ArchiveFile>[];
 
       final fileExt = path.extension(fileName).toLowerCase();
       if (fileExt == '.cbr') {
@@ -115,8 +114,7 @@ class ComicImporter {
       checkCancellation();
 
       debugPrint('Final filtered image count: ${imageFiles.length}');
-      // 2) Extract relevant image files (already filtered above)
-      // Check count
+      // 2) Extract relevant image files (already filtered above) Check count
       if (imageFiles.isEmpty) {
         throw Exception('No valid image files found in the provided archive.');
       }
@@ -124,19 +122,19 @@ class ComicImporter {
       // Phase 1: Upload & Analyze images => 0% .. 100%
       final totalFiles = imageFiles.length;
       final pageUrls = <String>[];
-      final List<Map<String, String>> pageSummaries = List.generate(
+      final pageSummaries = List<Map<String, String>>.generate(
         totalFiles,
         (_) => {},
         growable: false,
       );
-      final List<Map<String, dynamic>> panelSummaries = List.generate(
+      final panelSummaries = List<Map<String, dynamic>>.generate(
         totalFiles,
         (_) => {'panels': <Map<String, String>>[]},
         growable: false,
       );
-      final comicPredictions = ComicPredictions(pagePredictions: []);
+      final predictions = <Predictions>[];
 
-      for (int i = 0; i < totalFiles; i++) {
+      for (var i = 0; i < totalFiles; i++) {
         checkCancellation();
         final file = imageFiles[i];
         final filename = path.basename(file.name);
@@ -161,15 +159,14 @@ class ComicImporter {
           // Save Panels & Panel Summaries
           if (analysis.containsKey('panels')) {
             final panelsList = analysis['panels'] as List<Panel>;
-            final predictions = Predictions(panels: panelsList);
-            comicPredictions.pagePredictions.add(predictions);
+            predictions.add(Predictions(panels: panelsList));
 
             // Extract Panel Summaries
-            final List<Map<String, String>> panelSummaryMaps =
+            final panelSummaryMaps =
                 analysis['panel_summaries'] as List<Map<String, String>>;
             panelSummaries[i] = {'panels': panelSummaryMaps};
           } else {
-            comicPredictions.pagePredictions.add(Predictions(panels: []));
+            predictions.add(Predictions(panels: []));
           }
         } catch (e) {
           debugPrint('Fatal error analyzing page $i: $e');
@@ -196,7 +193,7 @@ class ComicImporter {
         thumbnailImage: '$userRootPath/thumbnails/$comicId.jpg',
         pageCount: pageUrls.length,
         pageImages: pageUrls,
-        predictions: comicPredictions,
+        predictions: predictions,
         pageSummaries: pageSummaries,
         panelSummaries: panelSummaries,
       );
@@ -210,7 +207,7 @@ class ComicImporter {
       debugPrint('Import failed: $e');
       try {
         await _cleanupIfCancelled(user.uid, comicId);
-      } catch (cleanupError) {
+      } on Exception catch (cleanupError) {
         debugPrint(
           'Cleanup failed (expected if no files uploaded): $cleanupError',
         );
@@ -224,9 +221,8 @@ class ComicImporter {
   }
 
   /// Extract images from the CBZ archive while ignoring known irrelevant files.
-  List<zip.ArchiveFile> _extractImagesFromArchive(zip.Archive archive) {
-    return _extractImagesFromArchiveList(archive.files);
-  }
+  List<zip.ArchiveFile> _extractImagesFromArchive(zip.Archive archive) =>
+      _extractImagesFromArchiveList(archive.files);
 
   /// Helper for both Zip and Rar lists
   List<zip.ArchiveFile> _extractImagesFromArchiveList(
@@ -301,9 +297,8 @@ class ComicImporter {
   final GeminiService _geminiService = GeminiService();
 
   /// Analyzes a comic page using Gemini.
-  Future<Map<String, dynamic>> _analyzePage(Uint8List imageBytes) async {
-    return _geminiService.analyzePage(imageBytes);
-  }
+  Future<Map<String, dynamic>> _analyzePage(Uint8List imageBytes) async =>
+      _geminiService.analyzePage(imageBytes);
 
   /// Deletes partial upload if import is cancelled or error.
   Future<void> _cleanupIfCancelled(String userId, String comicId) async {

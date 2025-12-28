@@ -8,9 +8,8 @@ import '../models/panel.dart';
 
 /// Service responsible for interacting with Gemini AI to analyze comic pages.
 class GeminiService {
-  final GenerativeModel? _mockModel;
-
   GeminiService({GenerativeModel? model}) : _mockModel = model;
+  final GenerativeModel? _mockModel;
 
   /// Analyzes a comic page using Gemini.
   ///
@@ -80,7 +79,7 @@ If no text or content is present, return empty strings for the summaries.
       final response = await model.generateContent([
         Content.multi([
           InlineDataPart('image/jpeg', imageBytes),
-          TextPart('Analyze this comic page.'),
+          const TextPart('Analyze this comic page.'),
         ]),
       ]);
 
@@ -107,9 +106,9 @@ If no text or content is present, return empty strings for the summaries.
       };
 
       if (parsed.containsKey('panels')) {
-        final List<dynamic> panelsJson = parsed['panels'] as List;
-        final List<Panel> panels = [];
-        final List<Map<String, String>> panelSummaries = [];
+        final panelsJson = parsed['panels'] as List;
+        final panels = <Panel>[];
+        final panelSummaries = <Map<String, String>>[];
 
         for (var j = 0; j < panelsJson.length; j++) {
           final panelData = panelsJson[j] as Map<String, dynamic>;
@@ -134,7 +133,7 @@ If no text or content is present, return empty strings for the summaries.
             Panel(
               id: 'panel_$j',
               displayName: 'panel',
-              confidence: 1.0,
+              confidence: 1,
               normalizedBox: Rect.fromLTRB(xMin, yMin, xMax, yMax),
             ),
           );

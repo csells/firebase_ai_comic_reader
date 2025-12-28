@@ -3,13 +3,11 @@ import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/foundation.dart' show debugPrint;
 
 import '../models/comic.dart';
-import 'comic_repository.dart';
 
-class ComicRepositoryFirebase implements ComicRepository {
+class ComicRepositoryFirebase {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final FirebaseStorage _storage = FirebaseStorage.instance;
 
-  @override
   Future<List<Comic>> getAllComics(String userId) async {
     // Firebase Auth access:
     final snapshot = await _firestore
@@ -20,7 +18,6 @@ class ComicRepositoryFirebase implements ComicRepository {
     return snapshot.docs.map((doc) => Comic.fromMap(doc.data())).toList();
   }
 
-  @override
   Future<Comic> getComicById(String userId, String comicId) async {
     // Firebase Auth access:
     final doc = await _firestore
@@ -35,7 +32,6 @@ class ComicRepositoryFirebase implements ComicRepository {
     throw Exception('Comic not found');
   }
 
-  @override
   Future<void> addComic(String userId, Comic comic) async {
     try {
       await _firestore
@@ -50,7 +46,6 @@ class ComicRepositoryFirebase implements ComicRepository {
     }
   }
 
-  @override
   Future<void> updateComic(String userId, Comic comic) async {
     try {
       await _firestore
@@ -65,7 +60,6 @@ class ComicRepositoryFirebase implements ComicRepository {
     }
   }
 
-  @override
   Future<void> deleteComic(String userId, String comicId) async {
     try {
       // 1. Delete comic document from Firestore
@@ -120,7 +114,6 @@ class ComicRepositoryFirebase implements ComicRepository {
     await deleteComic(userId, comicId);
   }
 
-  @override
   Future<void> updateCurrentPage(
     String userId,
     String comicId,

@@ -1,22 +1,17 @@
+import 'dart:async';
+
 import 'package:cached_network_image/cached_network_image.dart';
-import 'package:comic_reader/data/comic_repository_firebase.dart';
-import 'package:comic_reader/models/comic.dart';
-import 'package:comic_reader/models/predictions.dart';
-import 'package:comic_reader/views/panel_view.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../data/comic_repository_firebase.dart';
+import '../models/comic.dart';
+import 'panel_view.dart';
+
 class ReaderView extends StatefulWidget {
+  const ReaderView({required this.comic, required this.userId, super.key});
   final Comic comic;
   final String userId;
-  final String? firebaseAuthToken;
-
-  const ReaderView({
-    super.key,
-    required this.comic,
-    required this.userId,
-    this.firebaseAuthToken,
-  });
 
   @override
   State<ReaderView> createState() => ReaderViewState();
@@ -39,8 +34,8 @@ class ReaderViewState extends State<ReaderView> {
   /// Whether we’re showing the Gemini summary text.
   bool _showSummaries = true;
 
-  /// We remember the user’s summary toggle setting before switching to panel mode,
-  /// so we can restore it when exiting panel mode.
+  /// We remember the user’s summary toggle setting before switching to panel
+  /// mode, so we can restore it when exiting panel mode.
   bool _oldShowSummaries = true;
 
   @override
@@ -63,7 +58,9 @@ class ReaderViewState extends State<ReaderView> {
       }
     });
 
-    _repository.updateCurrentPage(widget.userId, widget.comic.id, index);
+    unawaited(
+      _repository.updateCurrentPage(widget.userId, widget.comic.id, index),
+    );
   }
 
   /// Toggles between page mode (page-based) and panel mode (panel-based).
@@ -92,14 +89,13 @@ class ReaderViewState extends State<ReaderView> {
     }
 
     // Grab the Predictions for this page, if available
-    final Predictions? currentPagePredictions = widget.comic.predictions == null
-        ? null
-        : (widget.comic.predictions!.pagePredictions.length > _currentPageIndex
-              ? widget.comic.predictions!.pagePredictions[_currentPageIndex]
-              : null);
+    final currentPagePredictions =
+        _currentPageIndex < widget.comic.predictions.length
+        ? widget.comic.predictions[_currentPageIndex]
+        : null;
 
     // Grab the Gemini summary for the current page
-    final String? currentPageSummaryRaw =
+    final currentPageSummaryRaw =
         (_currentPageIndex < widget.comic.pageSummaries.length)
         ? widget.comic.pageSummaries[_currentPageIndex][_selectedLanguage]
         : null;
@@ -109,7 +105,7 @@ class ReaderViewState extends State<ReaderView> {
     if (_panelMode && _currentPageIndex < widget.comic.panelSummaries.length) {
       final pageData = widget.comic.panelSummaries[_currentPageIndex];
       // Safely extract panels list from the map structure
-      final List? panels = pageData['panels'] as List?;
+      final panels = pageData['panels'] as List?;
 
       if (panels != null && _currentPanelIndex < panels.length) {
         final panelMap = panels[_currentPanelIndex];
@@ -149,7 +145,7 @@ class ReaderViewState extends State<ReaderView> {
       ),
       body: Focus(
         autofocus: true,
-        onKeyEvent: (FocusNode node, KeyEvent event) {
+        onKeyEvent: (node, event) {
           // Simple arrow-key navigation
           if (event is KeyDownEvent) {
             if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
@@ -166,7 +162,7 @@ class ReaderViewState extends State<ReaderView> {
           children: [
             Expanded(
               child: GestureDetector(
-                onTapUp: (TapUpDetails details) {
+                onTapUp: (details) {
                   final screenWidth = MediaQuery.of(context).size.width;
                   if (details.globalPosition.dx < screenWidth / 2) {
                     _goToPrevious();
@@ -178,7 +174,8 @@ class ReaderViewState extends State<ReaderView> {
                   duration: const Duration(milliseconds: 200),
                   child: KeyedSubtree(
                     key: ValueKey(
-                      'reader_${_currentPageIndex}_${_panelMode ? _currentPanelIndex : "page"}',
+                      'reader_$_currentPageIndex'
+                      '_${_panelMode ? _currentPanelIndex : "page"}',
                     ),
                     child:
                         (_panelMode &&
@@ -192,10 +189,10 @@ class ReaderViewState extends State<ReaderView> {
                             panelMode: _panelMode,
                           )
                         : InteractiveViewer(
-                            minScale: 1.0,
-                            maxScale: 4.0,
+                            minScale: 1,
+                            maxScale: 4,
                             child: Padding(
-                              padding: const EdgeInsets.all(32.0),
+                              padding: const EdgeInsets.all(32),
                               child: Image(
                                 image: CachedNetworkImageProvider(
                                   widget.comic.pageImages[_currentPageIndex],
@@ -221,22 +218,26 @@ class ReaderViewState extends State<ReaderView> {
                     children: [
                       Expanded(
                         child: Text(
-                          displayedSummary?.isNotEmpty == true
+                          displayedSummary?.isNotEmpty ?? false
                               ? displayedSummary!
                               : (_panelMode
                                     ? (currentPagePredictions == null ||
                                               currentPagePredictions
                                                   .panels
                                                   .isEmpty
-                                          ? 'Summaries unavailable because panel detection failed for this page.'
-                                          : 'No specific summary for this panel.')
-                                    : 'No page summary available. (Did the import finish?)'),
+                                          ? 'Summaries unavailable because '
+                                                'panel detection failed for '
+                                                'this page.'
+                                          : 'No specific summary for this '
+                                                'panel.')
+                                    : 'No page summary available. '
+                                          '(Did the import finish?)'),
                           style: TextStyle(
                             fontSize: 18,
-                            color: displayedSummary?.isNotEmpty == true
+                            color: displayedSummary?.isNotEmpty ?? false
                                 ? Colors.black
                                 : Colors.grey[600],
-                            fontStyle: displayedSummary?.isNotEmpty == true
+                            fontStyle: displayedSummary?.isNotEmpty ?? false
                                 ? FontStyle.normal
                                 : FontStyle.italic,
                           ),
@@ -251,7 +252,7 @@ class ReaderViewState extends State<ReaderView> {
                             fontSize: 14,
                             color: Colors.black,
                           ),
-                          onChanged: (String? newValue) {
+                          onChanged: (newValue) {
                             if (newValue != null) {
                               setState(() {
                                 _selectedLanguage = newValue;
@@ -279,16 +280,13 @@ class ReaderViewState extends State<ReaderView> {
               ),
               child: Builder(
                 builder: (context) {
-                  final List<({int page, int? panel})> globalReadingItems = [];
-                  int currentGlobalIndex = 0;
+                  final globalReadingItems = <({int page, int? panel})>[];
+                  var currentGlobalIndex = 0;
 
                   if (_panelMode) {
-                    for (int i = 0; i < widget.comic.pageCount; i++) {
-                      final pagePreds =
-                          (widget.comic.predictions?.pagePredictions.length ??
-                                  0) >
-                              i
-                          ? widget.comic.predictions!.pagePredictions[i]
+                    for (var i = 0; i < widget.comic.pageCount; i++) {
+                      final pagePreds = widget.comic.predictions.length > i
+                          ? widget.comic.predictions[i]
                           : null;
                       final panels = pagePreds?.panels ?? [];
                       if (panels.isEmpty) {
@@ -297,7 +295,7 @@ class ReaderViewState extends State<ReaderView> {
                         }
                         globalReadingItems.add((page: i, panel: null));
                       } else {
-                        for (int j = 0; j < panels.length; j++) {
+                        for (var j = 0; j < panels.length; j++) {
                           if (i == _currentPageIndex &&
                               j == _currentPanelIndex) {
                             currentGlobalIndex = globalReadingItems.length;
@@ -308,13 +306,13 @@ class ReaderViewState extends State<ReaderView> {
                     }
                   }
 
-                  final double sliderValue = _panelMode
+                  final sliderValue = _panelMode
                       ? currentGlobalIndex.toDouble()
                       : _currentPageIndex.toDouble();
-                  final double sliderMax = _panelMode
+                  final sliderMax = _panelMode
                       ? (globalReadingItems.length - 1).toDouble()
                       : (widget.comic.pageCount - 1).toDouble();
-                  final int sliderDivisions = _panelMode
+                  final sliderDivisions = _panelMode
                       ? globalReadingItems.length - 1
                       : widget.comic.pageCount - 1;
 
@@ -358,14 +356,13 @@ class ReaderViewState extends State<ReaderView> {
     );
   }
 
-  /// Navigates to the previous panel (if in panel mode), or previous page (if in page mode).
+  /// Navigates to the previous panel (if in panel mode), or previous page (if
+  /// in page mode).
   void _goToPrevious() {
-    final Predictions? currentPreds = widget.comic.predictions == null
-        ? null
-        : (widget.comic.predictions!.pagePredictions.length > _currentPageIndex
-              ? widget.comic.predictions!.pagePredictions[_currentPageIndex]
-              : null);
-    final int totalPanels = currentPreds?.panels.length ?? 0;
+    final currentPreds = _currentPageIndex < widget.comic.predictions.length
+        ? widget.comic.predictions[_currentPageIndex]
+        : null;
+    final totalPanels = currentPreds?.panels.length ?? 0;
 
     if (_panelMode && currentPreds != null && totalPanels > 0) {
       if (_currentPanelIndex > 0) {
@@ -377,10 +374,8 @@ class ReaderViewState extends State<ReaderView> {
         // Already at first panel; go to previous page's last panel if possible
         if (_currentPageIndex > 0) {
           final prevIndex = _currentPageIndex - 1;
-          final prevPreds =
-              (widget.comic.predictions?.pagePredictions.length ?? 0) >
-                  prevIndex
-              ? widget.comic.predictions!.pagePredictions[prevIndex]
+          final prevPreds = widget.comic.predictions.length > prevIndex
+              ? widget.comic.predictions[prevIndex]
               : null;
           final prevPanelsCount = prevPreds?.panels.length ?? 0;
 
@@ -398,14 +393,13 @@ class ReaderViewState extends State<ReaderView> {
     }
   }
 
-  /// Navigates to the next panel (if in panel mode), or next page (if in page mode).
+  /// Navigates to the next panel (if in panel mode), or next page (if in page
+  /// mode).
   void _goToNext() {
-    final Predictions? currentPreds = widget.comic.predictions == null
-        ? null
-        : (widget.comic.predictions!.pagePredictions.length > _currentPageIndex
-              ? widget.comic.predictions!.pagePredictions[_currentPageIndex]
-              : null);
-    final int totalPanels = currentPreds?.panels.length ?? 0;
+    final currentPreds = _currentPageIndex < widget.comic.predictions.length
+        ? widget.comic.predictions[_currentPageIndex]
+        : null;
+    final totalPanels = currentPreds?.panels.length ?? 0;
 
     if (_panelMode && currentPreds != null && totalPanels > 0) {
       // If we're not yet at the last panel, go to the next panel

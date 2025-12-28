@@ -3,7 +3,7 @@ import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as path;
 import 'package:rar/rar.dart';
 
-import 'rar_extractor_interface.dart';
+import 'rar_extractor.dart';
 
 class RarExtractorImpl implements RarExtractor {
   @override
