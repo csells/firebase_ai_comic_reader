@@ -1,112 +1,98 @@
 # Firebase AI Comic Reader
 
-A modern Flutter application for reading and analyzing comic books using Gemini AI.
+A modern Flutter application for reading and analyzing comic books using Gemini AI. This app transforms traditional comic archives (.CBZ, .CBR) into an interactive, AI-enhanced reading experience.
 
-## Core Use Cases
+<!-- TODO: Screenshot of the Library View showing comic thumbnails -->
+<!-- Placeholder: [Library View Screenshot] -->
 
-### 1. User Authentication
-*   **Log In / Sign Up**: Users can log in using their credentials. If an account doesn't exist, it is automatically created on Firebase.
-*   **Terminology**: The app uses "Email" and "Password" for a familiar login experience.
+## AI Features
 
-### 2. Comic Library Management
-*   **Add Comic**: Press the floating action button (+) to navigate your hard drive and select a comic file.
-*   **Supported Formats**: `.CBZ` (Zip) and `.CBR` (Rar) archives are supported.
-*   **Automated Import**: Upon selection, the app:
-    *   Decompresses the archive.
-    *   Uploads pages to Firebase Storage.
-    *   Generates a thumbnail for the library view.
-    *   Initiates AI analysis for all pages.
+### 1. Panel Mode Guided Reading
+- **Intelligent Panel Navigation**: The reader identifies individual panels and provides a guided "zoom-and-pan" experience.
+- **AI-Driven Reading Order**: Panels are returned by the AI in their natural reading order (typically top-to-bottom, left-to-right), ensuring a seamless narrative flow.
+- **Global Navigation**: A unified slider allows you to scrub through both pages and individual panels seamlessly.
 
-### 3. AI-Powered Analysis
-*   **Model**: Powered by the latest **Gemini 3 Flash Preview** for high-speed, intelligent OCR and visual analysis.
-*   **Panel Detection**: Automatically identifies the bounding box coordinates [0-1000] for every comic panel.
-*   **Multi-Language Summaries**: For every page and every detected panel, the AI generates narrative summaries in:
-    *   English (EN)
-    *   Spanish (ES)
-    *   French (FR)
-*   **Text Extraction**: Extracts and arranges comic text into a narrative flow.
+<!-- TODO: Screenshot of Panel Mode in action, showing a zoomed-in panel -->
+<!-- Placeholder: [Panel Mode Screenshot] -->
 
-### 4. Advanced Reading Experience
-*   **Page Mode**: Default navigation using a slider or arrow keys/keyboard.
-*   **Smart Mode (Panel-by-Panel)**: Toggle the "Science" icon to switch to Smart Mode. The reader will zoom in and navigate panel-by-panel, providing a focused, guided reading experience.
-*   **On-Demand Language Switching**: Swap between English, Spanish, and French for both page and panel summaries instantly.
-*   **Summary Toggle**: Show or hide the AI-generated summaries as desired.
+### 2. Multi-Lingual AI Summaries
+- **Instant Summaries**: Gemini analyzes every page and panel to provide narrative context.
+- **Language Switching**: Toggle between English (EN), Spanish (ES), and French (FR) summaries on the fly.
+- **Deep Insights**: AI insights are integrated directly into the reader, providing constant context for every scene.
+
+<!-- TODO: Screenshot of the Reader View showing the summary area with language selection -->
+<!-- Placeholder: [Reader View with Summaries] -->
+
+### 3. Automated Import & Analysis
+- **Format Support**: Drag and drop or select `.CBZ` (Zip) and `.CBR` (Rar) files.
+- **Background Processing**: The app automatically decompresses, uploads to Firebase Storage, and initiates a multi-stage AI analysis.
+
+---
 
 ## Setup Instructions
 
-To get this project running, you need to set up a Firebase project and configure your local environment.
-
-### 1. Firebase Project Setup
-1.  Go to the [Firebase Console](https://console.firebase.google.com/) and create a new project.
-2.  **Enable Billing**: Ensure your project is on the **Blaze (Pay-as-you-go) plan** to use the Vertex AI / Gemini features.
-3.  **Authentication**: 
-    - Enable the **Email/Password** sign-in provider.
-4.  **Cloud Firestore**:
-    - Create a database in **Production Mode** (or Test Mode for immediate start).
-    - Set the following Security Rules:
-      ```javascript
-      rules_version = '2';
-      service cloud.firestore {
-        match /databases/{database}/documents {
-          match /users/{userId}/{documents=**} {
-            allow read, write: if request.auth != null && request.auth.uid == userId;
-          }
+### 1. Firebase Project Configuration
+1.  **Create Project**: Start a new project in the [Firebase Console](https://console.firebase.google.com/).
+2.  **Enable Blaze Plan**: Go to **Authentication > Usage and Billing** and upgrade to the **Blaze (Pay-as-you-go)** plan. This is required for Gemini AI integration via Firebase.
+3.  **Authentication**: Enable **Email/Password** sign-in in the Authentication section.
+4.  **Cloud Firestore**: Create a database and set the following Security Rules:
+    ```javascript
+    rules_version = '2';
+    service cloud.firestore {
+      match /databases/{database}/documents {
+        match /users/{userId}/{documents=**} {
+          allow read, write: if request.auth != null && request.auth.uid == userId;
         }
       }
-      ```
-5.  **Firebase Storage**:
-    - Create a storage bucket.
-    - Set the following Security Rules to allow user-specific access and directory listing:
-      ```javascript
-      rules_version = '2';
-      service firebase.storage {
-        match /b/{bucket}/o {
-          match /comic_store/{userId}/{allPaths=**} {
-            allow read, write: if request.auth != null && request.auth.uid == userId;
-          }
+    }
+    ```
+5.  **Firebase Storage**: Create a bucket and set the following Security Rules:
+    ```javascript
+    rules_version = '2';
+    service firebase.storage {
+      match /b/{bucket}/o {
+        match /comic_store/{userId}/{allPaths=**} {
+          allow read, write: if request.auth != null && request.auth.uid == userId;
         }
       }
-      ```
-6.  **Gemini API (Vertex AI)**:
-    - Go to the [Firebase AI Logic settings](https://console.firebase.google.com/project/_/ailogic/settings).
-    - Link a **Gemini Developer API key** (this is required for the `firebase_ai` package to communicate with Google's models).
+    }
+    ```
 
-### 2. Local Configuration
-1.  Install the [Firebase CLI](https://firebase.google.com/docs/cli) if you haven't already.
-2.  Install the [FlutterFire CLI](https://firebase.google.com/docs/flutter/setup):
+### 2. Gemini AI Integration
+1.  **Firebase AI Logic**: Navigate to the [Firebase AI Logic](https://console.firebase.google.com/project/_/ailogic) section in the console.
+2.  **Link API Key**: Connect a **Gemini Developer API Key**. The app uses `gemini-3-flash-preview` for high-speed vision capabilities.
+
+### 3. Local Development Setup
+1.  **Firebase CLI**: Ensure you have the [Firebase CLI](https://firebase.google.com/docs/cli) installed.
+2.  **FlutterFire CLI**:
     ```bash
     dart pub global activate flutterfire_cli
     ```
-3.  Run the configuration command in your project root to link the app to your Firebase project:
+3.  **Configure Project**:
     ```bash
     flutterfire configure
     ```
-    This will generate the necessary `firebase_options.dart` file.
+4.  **Web CORS (Important)**: To allow cross-origin image processing for Panel Mode on the web:
+    - Create `cors.json`:
+      ```json
+      [{"origin": ["*"], "method": ["GET"], "maxAgeSeconds": 3600}]
+      ```
+    - Apply it:
+      ```bash
+      gsutil cors set cors.json gs://YOUR_BUCKET_NAME.firebasestorage.app
+      ```
 
-### 3. Web CORS Setup (Crucial for Smart Mode)
-For the Smart Mode (panel zooming) to work on the web, your browser must be allowed to process images from your Storage bucket.
-1.  Create a file named `cors.json` in your project root with the following content:
-    ```json
-    [
-      {
-        "origin": ["*"],
-        "method": ["GET"],
-        "maxAgeSeconds": 3600
-      }
-    ]
-    ```
-2.  Apply the CORS policy using `gsutil`:
-    ```bash
-    gsutil cors set cors.json gs://YOUR_BUCKET_NAME.firebasestorage.app
-    ```
-    *Replace `YOUR_BUCKET_NAME` with your actual bucket ID from the Firebase console.*
+---
 
-## Implementation Details
+## AI Implementation Insights
 
-*   **Flutter**: The primary framework for the cross-platform application.
-*   **Firebase Auth**: Handles secure user authentication and account lifecycle.
-*   **Firebase Storage**: Stores comic page images and thumbnails.
-*   **Cloud Firestore**: Manages comic metadata, AI predictions, and multilingual summaries.
-*   **Firebase AI (Gemini)**: Orchestrates the single-pass analysis for OCR, translation, and object detection (panels).
-*   **PageController**: Manages smooth transitions between comic pages.
-*   **PanelView**: A custom widget for cropping and displaying individual panels in Smart Mode.
+### Single-Pass AI Analysis
+The core logic resides in `GeminiService`, which leverages the `FirebaseAI.googleAI()` SDK to send comic pages to Gemini in a **single-pass analysis**. This efficiency allows us to extract:
+1.  **OCR Text**: Narrative extraction of all speech bubbles and text.
+2.  **Page Summaries**: High-level context for the entire page in 3 languages.
+3.  **Panel Detection**: Normalized bounding box coordinates `[ymin, xmin, ymax, xmax]` on a 0-1000 scale.
+4.  **Panel Reading Order**: The prompt explicitly instructs the LLM to return panels in their natural reading order, eliminating the need for complex app-side sorting algorithms.
+5.  **Panel-Specific Summaries**: Unique narrative descriptions for every detected panel in 3 languages.
+
+### Model Selection
+The app utilizes `gemini-3-flash-preview` to optimize for speed and accuracy in high-frequency visual tasks like panel detection and multilingual summarization.

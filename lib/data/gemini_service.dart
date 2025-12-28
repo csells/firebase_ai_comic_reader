@@ -57,6 +57,7 @@ class GeminiService {
       '2. Summarize the story/content in three languages: English (en), Spanish (es), and French (fr). \n'
       '3. Detect all comic panels and provide their bounding boxes in normalized coordinates [0, 1000]. \n'
       '4. Provide a narrative summary for each panel in the same three languages. \n'
+      '5. IMPORTANT: You MUST return the panels in their natural reading order (typically top-to-bottom, left-to-right). \n'
       '\n'
       'IMPORTANT: You MUST return a valid JSON object strictly following this schema: \n'
       '$schemaJson \n'

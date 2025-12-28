@@ -13,14 +13,14 @@ class PanelView extends StatefulWidget {
   final String imageUrl;
   final List<Panel> panels;
   final int currentPanelIndex;
-  final bool smartMode;
+  final bool panelMode;
 
   const PanelView({
     super.key,
     required this.imageUrl,
     required this.panels,
     required this.currentPanelIndex,
-    required this.smartMode,
+    required this.panelMode,
   });
 
   @override
@@ -44,7 +44,7 @@ class _PanelViewState extends State<PanelView> {
   @override
   void didUpdateWidget(covariant PanelView oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (widget.smartMode != oldWidget.smartMode ||
+    if (widget.panelMode != oldWidget.panelMode ||
         widget.currentPanelIndex != oldWidget.currentPanelIndex) {
       _scheduleJump();
     }
@@ -92,7 +92,7 @@ class _PanelViewState extends State<PanelView> {
         panel.convertToImageCoordinates(imageWidth, imageHeight);
       }
 
-      if (widget.smartMode) {
+      if (widget.panelMode) {
         _scheduleJump();
       }
     } catch (e) {
@@ -101,7 +101,7 @@ class _PanelViewState extends State<PanelView> {
   }
 
   void _jumpToPanel(int index) {
-    if (!widget.smartMode ||
+    if (!widget.panelMode ||
         _uiImage == null ||
         _imageSize == null ||
         _viewSize == null ||
@@ -120,8 +120,10 @@ class _PanelViewState extends State<PanelView> {
       return;
     }
 
-    final viewWidth = _viewSize!.width;
-    final viewHeight = _viewSize!.height;
+    const double padding = 32.0;
+    final viewWidth = _viewSize!.width - 2 * padding;
+    final viewHeight = _viewSize!.height - 2 * padding;
+
     final scale = math.min(
       viewWidth / pixelBox.width,
       viewHeight / pixelBox.height,
@@ -130,8 +132,8 @@ class _PanelViewState extends State<PanelView> {
     final panelCenterX = pixelBox.left + pixelBox.width / 2;
     final panelCenterY = pixelBox.top + pixelBox.height / 2;
 
-    final tx = viewWidth / 2 - (panelCenterX * scale);
-    final ty = viewHeight / 2 - (panelCenterY * scale);
+    final tx = (viewWidth / 2) - (panelCenterX * scale);
+    final ty = (viewHeight / 2) - (panelCenterY * scale);
 
     _transformationController.value = Matrix4.identity()
       ..setTranslationRaw(tx, ty, 0.0)
@@ -142,26 +144,37 @@ class _PanelViewState extends State<PanelView> {
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        _viewSize = Size(constraints.maxWidth, constraints.maxHeight);
+        final newViewSize = Size(constraints.maxWidth, constraints.maxHeight);
+        if (_viewSize != newViewSize) {
+          _viewSize = newViewSize;
+          if (widget.panelMode) {
+            _scheduleJump();
+          }
+        }
 
         if (_uiImage == null || _imageSize == null) {
           return const Center(child: CircularProgressIndicator());
         }
 
         return Container(
-          color: Colors.black,
-          child: InteractiveViewer(
-            transformationController: _transformationController,
-            minScale: 1.0,
-            maxScale: 5.0,
-            boundaryMargin: const EdgeInsets.all(2000),
-            clipBehavior: Clip.none,
-            constrained: false,
-            child: CustomPaint(
-              size: _imageSize!,
-              painter: widget.smartMode
-                  ? _buildSmartModePainter()
-                  : _buildNormalModePainter(),
+          color: Theme.of(context).scaffoldBackgroundColor,
+          child: Padding(
+            padding: const EdgeInsets.all(32.0),
+            child: InteractiveViewer(
+              transformationController: _transformationController,
+              minScale: 1.0,
+              maxScale: 5.0,
+              boundaryMargin: const EdgeInsets.all(2000),
+              clipBehavior: Clip.none,
+              constrained: false,
+              child: CustomPaint(
+                size: _imageSize!,
+                painter: widget.panelMode
+                    ? _buildSmartModePainter(
+                        Theme.of(context).scaffoldBackgroundColor,
+                      )
+                    : _buildNormalModePainter(),
+              ),
             ),
           ),
         );
@@ -173,7 +186,7 @@ class _PanelViewState extends State<PanelView> {
     return PanelImagePainter(uiImage: _uiImage!, panels: widget.panels);
   }
 
-  CustomPainter _buildSmartModePainter() {
+  CustomPainter _buildSmartModePainter(Color backgroundColor) {
     if (widget.panels.isEmpty ||
         widget.currentPanelIndex < 0 ||
         widget.currentPanelIndex >= widget.panels.length) {
@@ -184,6 +197,7 @@ class _PanelViewState extends State<PanelView> {
     return SmartPanelImagePainter(
       uiImage: _uiImage!,
       panelRect: panel.pixelBox ?? Rect.zero,
+      backgroundColor: backgroundColor,
     );
   }
 }
@@ -222,20 +236,25 @@ class PanelImagePainter extends CustomPainter {
 class SmartPanelImagePainter extends CustomPainter {
   final ui.Image uiImage;
   final Rect panelRect;
+  final Color backgroundColor;
 
-  SmartPanelImagePainter({required this.uiImage, required this.panelRect});
+  SmartPanelImagePainter({
+    required this.uiImage,
+    required this.panelRect,
+    required this.backgroundColor,
+  });
 
   @override
   void paint(Canvas canvas, Size size) {
-    // 1) Paint entire image area black
-    final blackPaint = Paint()..color = Colors.black;
+    // 1) Paint entire image area with theme background color
+    final backgroundPaint = Paint()..color = backgroundColor;
     final imageBounds = Rect.fromLTWH(
       0,
       0,
       uiImage.width.toDouble(),
       uiImage.height.toDouble(),
     );
-    canvas.drawRect(imageBounds, blackPaint);
+    canvas.drawRect(imageBounds, backgroundPaint);
 
     // 2) Clip to the panelRect, then draw the image into that area
     canvas.save();

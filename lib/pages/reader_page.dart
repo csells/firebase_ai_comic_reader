@@ -62,9 +62,6 @@ class ReaderPageState extends State<ReaderPage> {
                   body: Center(child: Text('Error: ${tokenSnapshot.error}')),
                 );
               } else {
-                debugPrint(
-                  'ReaderPage: Firebase Auth Token: ${tokenSnapshot.data}',
-                );
                 return ReaderView(
                   comic: snapshot.data!,
                   userId: widget.userId,

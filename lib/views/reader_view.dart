@@ -23,88 +23,65 @@ class ReaderView extends StatefulWidget {
 }
 
 class ReaderViewState extends State<ReaderView> {
-  final PageController _pageController = PageController();
   final ComicRepositoryFirebase _repository = ComicRepositoryFirebase();
 
   late int _currentPageIndex;
 
-  /// Whether we’re in panel-by-panel smart mode.
-  bool _smartMode = false;
+  /// Whether we’re in panel-by-panel panel mode.
+  bool _panelMode = false;
 
-  /// Which panel (0-based index) we’re currently focused on in smart mode.
+  /// Which panel (0-based index) we’re currently focused on in panel mode.
   int _currentPanelIndex = 0;
-
-  /// Flag: If we jump to a new page in smart mode, do we go to the first or last panel?
-  bool? _goToFirstPanelOnLoad;
 
   /// Selected language for summaries.
   String _selectedLanguage = 'en';
 
-  /// Whether we’re showing the Gemini summary text in normal mode.
+  /// Whether we’re showing the Gemini summary text.
   bool _showSummaries = true;
 
-  /// We remember the user’s summary toggle setting before switching to smart mode,
-  /// so we can restore it when exiting smart mode.
+  /// We remember the user’s summary toggle setting before switching to panel mode,
+  /// so we can restore it when exiting panel mode.
   bool _oldShowSummaries = true;
 
   @override
   void initState() {
     super.initState();
     _currentPageIndex = widget.comic.currentPage;
-
-    // Jump the PageView to the current page on first load.
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _pageController.jumpToPage(_currentPageIndex);
-    });
   }
 
-  /// Fired when the user swipes to a different page (in normal mode),
-  /// or we programmatically change the page (in smart mode).
-  void _onPageChanged(int index) {
-    int newPanelIndex = 0;
-
-    // If in smart mode and we have a specific target (e.g. going back to previous page)
-    if (_smartMode && _goToFirstPanelOnLoad == false) {
-      final predictions = widget.comic.predictions;
-      if (predictions != null && index < predictions.pagePredictions.length) {
-        final panels = predictions.pagePredictions[index].panels;
-        if (panels.isNotEmpty) {
-          newPanelIndex = panels.length - 1;
-        }
-      }
-    }
+  /// Updates the current page and optionally the panel index.
+  void _updatePage(int index, {int? panelIndex}) {
+    if (index < 0 || index >= widget.comic.pageCount) return;
 
     setState(() {
       _currentPageIndex = index;
-      _currentPanelIndex = newPanelIndex;
-      _goToFirstPanelOnLoad = null;
+      if (panelIndex != null) {
+        _currentPanelIndex = panelIndex;
+      } else {
+        // Default to first panel on new page unless otherwise specified
+        _currentPanelIndex = 0;
+      }
     });
+
     _repository.updateCurrentPage(widget.userId, widget.comic.id, index);
   }
 
-  /// Toggles between normal mode (page-based) and smart mode (panel-based).
-  void _toggleSmartMode() {
+  /// Toggles between page mode (page-based) and panel mode (panel-based).
+  void _togglePanelMode() {
     setState(() {
-      if (!_smartMode) {
-        // Switching from normal to smart mode:
+      if (!_panelMode) {
+        // Switching from page to panel mode:
         _oldShowSummaries = _showSummaries;
-        _showSummaries = true; // Enabled in smart mode to show panel summaries
-        _smartMode = true;
+        _showSummaries = true; // Enabled in panel mode to show panel summaries
+        _panelMode = true;
         _currentPanelIndex = 0;
       } else {
-        // Switching from smart mode back to normal mode:
-        _smartMode = false;
+        // Switching from panel mode back to page mode:
+        _panelMode = false;
         _showSummaries =
             _oldShowSummaries; // Restore prior summary toggle state
         _currentPanelIndex = 0;
       }
-    });
-  }
-
-  /// Toggles whether we display summaries.
-  void _toggleSummaries() {
-    setState(() {
-      _showSummaries = !_showSummaries;
     });
   }
 
@@ -127,9 +104,9 @@ class ReaderViewState extends State<ReaderView> {
         ? widget.comic.pageSummaries[_currentPageIndex][_selectedLanguage]
         : null;
 
-    // Grab the Panel summary if in smart mode
+    // Grab the Panel summary if in panel mode
     String? currentPanelSummaryRaw;
-    if (_smartMode && _currentPageIndex < widget.comic.panelSummaries.length) {
+    if (_panelMode && _currentPageIndex < widget.comic.panelSummaries.length) {
       final pageData = widget.comic.panelSummaries[_currentPageIndex];
       // Safely extract panels list from the map structure
       final List? panels = pageData['panels'] as List?;
@@ -142,110 +119,32 @@ class ReaderViewState extends State<ReaderView> {
       }
     }
 
-    final displayedSummary = _smartMode
+    final displayedSummary = _panelMode
         ? currentPanelSummaryRaw
         : currentPageSummaryRaw;
 
     return Scaffold(
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
-        title: Text(widget.comic.title, overflow: TextOverflow.ellipsis),
-        centerTitle: false, // Changed to false to give more room for actions
+        title: Text(
+          widget.comic.title,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(fontSize: 16),
+        ),
+        centerTitle: false,
         actions: [
-          // Simplified Language Dropdown
-          DropdownButtonHideUnderline(
-            child: DropdownButton<String>(
-              value: _selectedLanguage,
-              icon: const Icon(Icons.language),
-              onChanged: (String? newValue) {
-                if (newValue != null) {
-                  setState(() {
-                    _selectedLanguage = newValue;
-                  });
-                }
-              },
-              items: const [
-                DropdownMenuItem(value: 'en', child: Text('EN')),
-                DropdownMenuItem(value: 'es', child: Text('ES')),
-                DropdownMenuItem(value: 'fr', child: Text('FR')),
-              ],
+          // Panel-mode button
+          IconButton(
+            icon: Icon(
+              _panelMode ? Icons.grid_view : Icons.description,
+              color: _panelMode ? Colors.blue : null,
             ),
+            onPressed: _togglePanelMode,
+            tooltip: _panelMode
+                ? 'Switch to Page Mode'
+                : 'Switch to Panel Mode',
           ),
           const SizedBox(width: 8),
-          // Smart-mode button
-          IconButton(
-            icon: Icon(
-              Icons.science,
-              color: _smartMode ? Colors.blue : null, // Highlight when ON
-            ),
-            onPressed: _toggleSmartMode,
-            tooltip: _smartMode ? 'Smart Mode (ON)' : 'Smart Mode (OFF)',
-          ),
-          // Summaries toggle button
-          IconButton(
-            icon: Icon(
-              _showSummaries ? Icons.comment : Icons.comment_bank_outlined,
-            ),
-            onPressed: _toggleSummaries,
-            tooltip: _showSummaries ? 'Hide Summaries' : 'Show Summaries',
-          ),
-          PopupMenuButton<String>(
-            onSelected: (value) async {
-              if (value == 'delete') {
-                final confirmed = await showDialog<bool>(
-                  context: context,
-                  builder: (context) => AlertDialog(
-                    title: const Text('Delete Comic'),
-                    content: const Text(
-                      'Are you sure you want to delete this comic?',
-                    ),
-                    actions: [
-                      TextButton(
-                        onPressed: () => Navigator.pop(context, false),
-                        child: const Text('Cancel'),
-                      ),
-                      TextButton(
-                        onPressed: () => Navigator.pop(context, true),
-                        child: const Text(
-                          'Delete',
-                          style: TextStyle(color: Colors.red),
-                        ),
-                      ),
-                    ],
-                  ),
-                );
-
-                if (context.mounted && confirmed == true) {
-                  try {
-                    await _repository.deleteComic(
-                      widget.userId,
-                      widget.comic.id,
-                    );
-                    if (context.mounted) {
-                      Navigator.pop(context); // Go back to library
-                    }
-                  } catch (e) {
-                    if (context.mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(content: Text('Failed to delete comic: $e')),
-                      );
-                    }
-                  }
-                }
-              }
-            },
-            itemBuilder: (context) => [
-              const PopupMenuItem(
-                value: 'delete',
-                child: Row(
-                  children: [
-                    Icon(Icons.delete, color: Colors.red),
-                    SizedBox(width: 8),
-                    Text('Delete Comic', style: TextStyle(color: Colors.red)),
-                  ],
-                ),
-              ),
-            ],
-          ),
         ],
       ),
       body: Focus(
@@ -275,130 +174,181 @@ class ReaderViewState extends State<ReaderView> {
                     _goToNext();
                   }
                 },
-                child: PageView.builder(
-                  controller: _pageController,
-                  physics: _smartMode
-                      ? const NeverScrollableScrollPhysics()
-                      : const BouncingScrollPhysics(),
-                  onPageChanged: _onPageChanged,
-                  itemCount: widget.comic.pageCount,
-                  itemBuilder: (context, index) {
-                    final imageUrl = widget.comic.pageImages[index];
-
-                    // If we’re in smart mode, show the panel-by-panel view
-                    if (_smartMode && index == _currentPageIndex) {
-                      if (currentPagePredictions != null &&
-                          currentPagePredictions.panels.isNotEmpty) {
-                        return PanelView(
-                          imageUrl: imageUrl,
-                          panels: currentPagePredictions.panels,
-                          currentPanelIndex: _currentPanelIndex,
-                          smartMode: _smartMode,
-                        );
-                      } else {
-                        // No predictions on this page? Fall back to normal image display
-                        return InteractiveViewer(
-                          minScale: 1.0,
-                          maxScale: 4.0,
-                          child: Image(
-                            image: CachedNetworkImageProvider(imageUrl),
-                            fit: BoxFit.contain,
+                child: AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 200),
+                  child: KeyedSubtree(
+                    key: ValueKey(
+                      'reader_${_currentPageIndex}_${_panelMode ? _currentPanelIndex : "page"}',
+                    ),
+                    child:
+                        (_panelMode &&
+                            currentPagePredictions != null &&
+                            currentPagePredictions.panels.isNotEmpty)
+                        ? PanelView(
+                            imageUrl:
+                                widget.comic.pageImages[_currentPageIndex],
+                            panels: currentPagePredictions.panels,
+                            currentPanelIndex: _currentPanelIndex,
+                            panelMode: _panelMode,
+                          )
+                        : InteractiveViewer(
+                            minScale: 1.0,
+                            maxScale: 4.0,
+                            child: Padding(
+                              padding: const EdgeInsets.all(32.0),
+                              child: Image(
+                                image: CachedNetworkImageProvider(
+                                  widget.comic.pageImages[_currentPageIndex],
+                                ),
+                                fit: BoxFit.contain,
+                              ),
+                            ),
                           ),
-                        );
-                      }
-                    } else {
-                      // Normal mode: just display the full page with zoom
-                      return InteractiveViewer(
-                        minScale: 1.0,
-                        maxScale: 4.0,
-                        child: Image(
-                          image: CachedNetworkImageProvider(imageUrl),
-                          fit: BoxFit.contain,
-                        ),
-                      );
-                    }
-                  },
+                  ),
                 ),
               ),
             ),
 
-            // Only show the Gemini summary if user has toggled it on.
-            if (_showSummaries)
-              Container(
-                width: double.infinity,
-                color: _smartMode ? Colors.blue[50] : Colors.grey[200],
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 12,
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    if (_smartMode)
-                      Row(
-                        children: [
-                          const Icon(
-                            Icons.science,
-                            color: Colors.blue,
-                            size: 14,
+            // Always show the Gemini summary.
+            Container(
+              width: double.infinity,
+              color: _panelMode ? Colors.blue[50] : Colors.grey[200],
+              padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          displayedSummary?.isNotEmpty == true
+                              ? displayedSummary!
+                              : (_panelMode
+                                    ? (currentPagePredictions == null ||
+                                              currentPagePredictions
+                                                  .panels
+                                                  .isEmpty
+                                          ? 'Summaries unavailable because panel detection failed for this page.'
+                                          : 'No specific summary for this panel.')
+                                    : 'No page summary available. (Did the import finish?)'),
+                          style: TextStyle(
+                            fontSize: 18,
+                            color: displayedSummary?.isNotEmpty == true
+                                ? Colors.black
+                                : Colors.grey[600],
+                            fontStyle: displayedSummary?.isNotEmpty == true
+                                ? FontStyle.normal
+                                : FontStyle.italic,
                           ),
-                          const SizedBox(width: 4),
-                          const Text(
-                            'SMART MODE ACTIVE',
-                            style: TextStyle(
-                              fontSize: 10,
-                              fontWeight: FontWeight.bold,
-                              color: Colors.blue,
-                            ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      DropdownButtonHideUnderline(
+                        child: DropdownButton<String>(
+                          value: _selectedLanguage,
+                          icon: const Icon(Icons.language, size: 20),
+                          style: const TextStyle(
+                            fontSize: 14,
+                            color: Colors.black,
                           ),
-                          const Spacer(),
-                          if (currentPagePredictions == null ||
-                              currentPagePredictions.panels.isEmpty)
-                            const Text(
-                              '(No panels detected for this page)',
-                              style: TextStyle(fontSize: 10, color: Colors.red),
-                            ),
-                        ],
+                          onChanged: (String? newValue) {
+                            if (newValue != null) {
+                              setState(() {
+                                _selectedLanguage = newValue;
+                              });
+                            }
+                          },
+                          items: const [
+                            DropdownMenuItem(value: 'en', child: Text('EN')),
+                            DropdownMenuItem(value: 'es', child: Text('ES')),
+                            DropdownMenuItem(value: 'fr', child: Text('FR')),
+                          ],
+                        ),
                       ),
-                    const SizedBox(height: 4),
-                    Text(
-                      displayedSummary?.isNotEmpty == true
-                          ? displayedSummary!
-                          : (_smartMode
-                                ? (currentPagePredictions == null ||
-                                          currentPagePredictions.panels.isEmpty
-                                      ? 'Summaries unavailable because panel detection failed for this page.'
-                                      : 'No specific summary for this panel.')
-                                : 'No page summary available. (Did the import finish?)'),
-                      style: TextStyle(
-                        fontSize: 14,
-                        color: displayedSummary?.isNotEmpty == true
-                            ? Colors.black
-                            : Colors.grey[600],
-                        fontStyle: displayedSummary?.isNotEmpty == true
-                            ? FontStyle.normal
-                            : FontStyle.italic,
-                      ),
-                    ),
-                  ],
-                ),
+                    ],
+                  ),
+                ],
               ),
+            ),
 
-            // Page slider
+            // Page/Panel slider
             Padding(
               padding: EdgeInsets.symmetric(
                 horizontal: MediaQuery.of(context).size.width * 0.1,
                 vertical: 16,
               ),
-              child: Slider(
-                value: _currentPageIndex.toDouble(),
-                min: 0,
-                max: (widget.comic.pageCount - 1).toDouble(),
-                divisions: widget.comic.pageCount - 1,
-                label: (_currentPageIndex + 1).toString(),
-                onChanged: (value) {
-                  _pageController.jumpToPage(value.round());
-                  _onPageChanged(value.round());
+              child: Builder(
+                builder: (context) {
+                  final List<({int page, int? panel})> globalReadingItems = [];
+                  int currentGlobalIndex = 0;
+
+                  if (_panelMode) {
+                    for (int i = 0; i < widget.comic.pageCount; i++) {
+                      final pagePreds =
+                          (widget.comic.predictions?.pagePredictions.length ??
+                                  0) >
+                              i
+                          ? widget.comic.predictions!.pagePredictions[i]
+                          : null;
+                      final panels = pagePreds?.panels ?? [];
+                      if (panels.isEmpty) {
+                        if (i == _currentPageIndex) {
+                          currentGlobalIndex = globalReadingItems.length;
+                        }
+                        globalReadingItems.add((page: i, panel: null));
+                      } else {
+                        for (int j = 0; j < panels.length; j++) {
+                          if (i == _currentPageIndex &&
+                              j == _currentPanelIndex) {
+                            currentGlobalIndex = globalReadingItems.length;
+                          }
+                          globalReadingItems.add((page: i, panel: j));
+                        }
+                      }
+                    }
+                  }
+
+                  final double sliderValue = _panelMode
+                      ? currentGlobalIndex.toDouble()
+                      : _currentPageIndex.toDouble();
+                  final double sliderMax = _panelMode
+                      ? (globalReadingItems.length - 1).toDouble()
+                      : (widget.comic.pageCount - 1).toDouble();
+                  final int sliderDivisions = _panelMode
+                      ? globalReadingItems.length - 1
+                      : widget.comic.pageCount - 1;
+
+                  String sliderLabel;
+                  if (_panelMode) {
+                    final item = globalReadingItems[currentGlobalIndex];
+                    if (item.panel != null) {
+                      sliderLabel =
+                          'Page ${item.page + 1}, Panel ${item.panel! + 1}';
+                    } else {
+                      sliderLabel = 'Page ${item.page + 1}';
+                    }
+                  } else {
+                    sliderLabel = 'Page ${_currentPageIndex + 1}';
+                  }
+
+                  return Slider(
+                    value: sliderValue,
+                    min: 0,
+                    max: sliderMax > 0 ? sliderMax : 0,
+                    divisions: sliderDivisions > 0 ? sliderDivisions : 1,
+                    label: sliderLabel,
+                    onChanged: (value) {
+                      if (_panelMode) {
+                        final idx = value.round();
+                        if (idx >= 0 && idx < globalReadingItems.length) {
+                          final item = globalReadingItems[idx];
+                          _updatePage(item.page, panelIndex: item.panel ?? 0);
+                        }
+                      } else {
+                        _updatePage(value.round());
+                      }
+                    },
+                  );
                 },
               ),
             ),
@@ -408,7 +358,7 @@ class ReaderViewState extends State<ReaderView> {
     );
   }
 
-  /// Navigates to the previous panel (if in smart mode), or previous page (if in normal mode).
+  /// Navigates to the previous panel (if in panel mode), or previous page (if in page mode).
   void _goToPrevious() {
     final Predictions? currentPreds = widget.comic.predictions == null
         ? null
@@ -417,7 +367,7 @@ class ReaderViewState extends State<ReaderView> {
               : null);
     final int totalPanels = currentPreds?.panels.length ?? 0;
 
-    if (_smartMode && currentPreds != null && totalPanels > 0) {
+    if (_panelMode && currentPreds != null && totalPanels > 0) {
       if (_currentPanelIndex > 0) {
         // Move to previous panel
         setState(() {
@@ -426,26 +376,29 @@ class ReaderViewState extends State<ReaderView> {
       } else {
         // Already at first panel; go to previous page's last panel if possible
         if (_currentPageIndex > 0) {
-          _goToFirstPanelOnLoad =
-              false; // We'll want the last panel on that page
-          _pageController.previousPage(
-            duration: const Duration(milliseconds: 150),
-            curve: Curves.easeInOut,
+          final prevIndex = _currentPageIndex - 1;
+          final prevPreds =
+              (widget.comic.predictions?.pagePredictions.length ?? 0) >
+                  prevIndex
+              ? widget.comic.predictions!.pagePredictions[prevIndex]
+              : null;
+          final prevPanelsCount = prevPreds?.panels.length ?? 0;
+
+          _updatePage(
+            prevIndex,
+            panelIndex: prevPanelsCount > 0 ? prevPanelsCount - 1 : 0,
           );
         }
       }
     } else {
-      // Normal mode: just go to the previous page if it exists
+      // Page mode: just go to the previous page if it exists
       if (_currentPageIndex > 0) {
-        _pageController.previousPage(
-          duration: const Duration(milliseconds: 150),
-          curve: Curves.easeInOut,
-        );
+        _updatePage(_currentPageIndex - 1);
       }
     }
   }
 
-  /// Navigates to the next panel (if in smart mode), or next page (if in normal mode).
+  /// Navigates to the next panel (if in panel mode), or next page (if in page mode).
   void _goToNext() {
     final Predictions? currentPreds = widget.comic.predictions == null
         ? null
@@ -454,7 +407,7 @@ class ReaderViewState extends State<ReaderView> {
               : null);
     final int totalPanels = currentPreds?.panels.length ?? 0;
 
-    if (_smartMode && currentPreds != null && totalPanels > 0) {
+    if (_panelMode && currentPreds != null && totalPanels > 0) {
       // If we're not yet at the last panel, go to the next panel
       if (_currentPanelIndex < totalPanels - 1) {
         setState(() {
@@ -463,20 +416,13 @@ class ReaderViewState extends State<ReaderView> {
       } else {
         // If at last panel, try to go to next page's first panel
         if (_currentPageIndex < (widget.comic.pageCount - 1)) {
-          _goToFirstPanelOnLoad = true; // We'll want the first panel there
-          _pageController.nextPage(
-            duration: const Duration(milliseconds: 150),
-            curve: Curves.easeInOut,
-          );
+          _updatePage(_currentPageIndex + 1);
         }
       }
     } else {
-      // Normal mode: go to next page if possible
+      // Page mode: go to next page if possible
       if (_currentPageIndex < widget.comic.pageCount - 1) {
-        _pageController.nextPage(
-          duration: const Duration(milliseconds: 150),
-          curve: Curves.easeInOut,
-        );
+        _updatePage(_currentPageIndex + 1);
       }
     }
   }

@@ -2,7 +2,7 @@ import 'dart:ui';
 
 import 'panel.dart';
 
-/// Represents the results of panel detection from Vertex AI's object detection model.
+/// Represents the results of panel detection from the AI model.
 ///
 /// This class contains both the detected panels and metadata about the model that performed the detection.
 /// It can be serialized to and from JSON for storage or transmission.
@@ -13,7 +13,7 @@ class Predictions {
   /// The ID of the deployed model that performed the detection.
   final String? deployedModelId;
 
-  /// The full path to the model in Vertex AI.
+  /// The full path to the model.
   final String? model;
 
   /// The display name of the model.
@@ -23,14 +23,14 @@ class Predictions {
   final String? modelVersionId;
 
   Predictions({
-    required List<Panel> panels,
+    required this.panels,
     this.deployedModelId,
     this.model,
     this.modelDisplayName,
     this.modelVersionId,
-  }) : panels = _sortPanelsInReadingOrder(panels);
+  });
 
-  /// Creates a Predictions instance from JSON data received from Vertex AI.
+  /// Creates a Predictions instance from JSON data received from the AI.
   factory Predictions.fromJson(Map<String, dynamic> json) {
     final List<dynamic> predictionsJson = json['predictions'] as List;
 
@@ -79,51 +79,6 @@ class Predictions {
       modelDisplayName: json['modelDisplayName'] as String?,
       modelVersionId: json['modelVersionId'] as String?,
     );
-  }
-
-  /// Sorts panels in reading order: top-to-bottom first, then left-to-right within rows.
-  static List<Panel> _sortPanelsInReadingOrder(List<Panel> panels) {
-    if (panels.isEmpty) return [];
-
-    // Working copies for sorting
-    final workingList = List<Panel>.from(panels);
-
-    // Grouping by "rows" based on vertical overlap/proximity
-    const rowTolerance = 0.05; // 5% of height
-
-    // Sort top-to-bottom by vertical center
-    workingList.sort(
-      (a, b) => a.normalizedCenterY.compareTo(b.normalizedCenterY),
-    );
-
-    final sorted = <Panel>[];
-    final currentRow = <Panel>[];
-
-    for (final panel in workingList) {
-      if (currentRow.isEmpty) {
-        currentRow.add(panel);
-      } else {
-        final rowReferenceY = currentRow.first.normalizedCenterY;
-        if ((panel.normalizedCenterY - rowReferenceY).abs() <= rowTolerance) {
-          currentRow.add(panel);
-        } else {
-          // Finish current row
-          currentRow.sort(
-            (a, b) => a.normalizedCenterX.compareTo(b.normalizedCenterX),
-          );
-          sorted.addAll(currentRow);
-          currentRow.clear();
-          currentRow.add(panel);
-        }
-      }
-    }
-    // Add last row
-    currentRow.sort(
-      (a, b) => a.normalizedCenterX.compareTo(b.normalizedCenterX),
-    );
-    sorted.addAll(currentRow);
-
-    return sorted;
   }
 
   Map<String, dynamic> toMap() {
