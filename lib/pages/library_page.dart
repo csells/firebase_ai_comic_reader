@@ -2,6 +2,7 @@
 
 import 'dart:async';
 
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:comic_reader/data/comic_importer.dart';
 import 'package:comic_reader/data/comic_repository_firebase.dart';
 import 'package:file_picker/file_picker.dart';
@@ -84,14 +85,6 @@ class _LibraryPageState extends State<LibraryPage> {
         return StreamBuilder<double>(
           stream: progressStream,
           builder: (context, snapshot) {
-            if (snapshot.connectionState == ConnectionState.done) {
-              WidgetsBinding.instance.addPostFrameCallback((_) {
-                if (Navigator.of(context).canPop()) {
-                  Navigator.of(context).pop();
-                }
-              });
-            }
-
             final progress = snapshot.data ?? 0.0;
             return AlertDialog(
               content: Column(
@@ -185,19 +178,30 @@ class _LibraryPageState extends State<LibraryPage> {
         );
         debugPrint('ComicReader: Comic imported to: $comicPath');
 
+        // Close progress dialog on success
+        if (mounted && dialogShown) {
+          Navigator.of(context).pop();
+          dialogShown = false;
+        }
+
         // Reload the library display
         await _loadComicThumbnails();
       } catch (e) {
         debugPrint('ComicReader: Error importing comic: $e');
+
+        // Close progress dialog before showing error dialog
+        if (mounted && dialogShown) {
+          Navigator.of(context).pop();
+          dialogShown = false;
+        }
+
         if (mounted) {
           _showErrorDialog(context, 'Error importing comic: $e');
         }
       } finally {
-        progressStream.close();
-        if (context.mounted && dialogShown) {
-          if (Navigator.of(context).canPop()) {
-            Navigator.of(context).pop();
-          }
+        // Ensure stream is closed if it wasn't already
+        if (!progressStream.isClosed) {
+          progressStream.close();
         }
       }
     } else {
@@ -323,24 +327,39 @@ class _LibraryPageState extends State<LibraryPage> {
                     // Keep long-press as an alternative
                     _showDeleteConfirmationDialog(comicId);
                   },
-                  child: Image.network(url, fit: BoxFit.cover),
+                  child: Card(
+                    elevation: 4,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    clipBehavior: Clip.antiAlias,
+                    child: CachedNetworkImage(
+                      imageUrl: url,
+                      fit: BoxFit.cover,
+                      placeholder: (context, url) =>
+                          const Center(child: CircularProgressIndicator()),
+                      errorWidget: (context, url, error) =>
+                          const Center(child: Icon(Icons.error)),
+                    ),
+                  ),
                 ),
               ),
               Positioned(
-                top: 0,
-                right: 0,
+                top: 4,
+                right: 4,
                 child: Container(
                   decoration: BoxDecoration(
                     color: Colors.black.withValues(alpha: 0.5),
                     borderRadius: const BorderRadius.only(
                       bottomLeft: Radius.circular(8),
+                      topRight: Radius.circular(8),
                     ),
                   ),
                   child: IconButton(
                     icon: const Icon(
                       Icons.delete,
                       color: Colors.white,
-                      size: 20,
+                      size: 18,
                     ),
                     tooltip: 'Delete Comic',
                     onPressed: () {

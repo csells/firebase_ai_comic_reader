@@ -23,17 +23,14 @@ class Predictions {
   final String? modelVersionId;
 
   Predictions({
-    required this.panels,
+    required List<Panel> panels,
     this.deployedModelId,
     this.model,
     this.modelDisplayName,
     this.modelVersionId,
-  });
+  }) : panels = _sortPanelsInReadingOrder(panels);
 
   /// Creates a Predictions instance from JSON data received from Vertex AI.
-  ///
-  /// [json] The JSON response from Vertex AI's object detection API.
-  /// The JSON should contain a 'predictions' array with bounding boxes and metadata.
   factory Predictions.fromJson(Map<String, dynamic> json) {
     final List<dynamic> predictionsJson = json['predictions'] as List;
 
@@ -55,8 +52,9 @@ class Predictions {
 
     final panels = <Panel>[];
     for (var i = 0; i < bboxes.length; i++) {
-      final List<double> bbox =
-          (bboxes[i] as List).map((e) => (e as num).toDouble()).toList();
+      final List<double> bbox = (bboxes[i] as List)
+          .map((e) => (e as num).toDouble())
+          .toList();
       // bbox order: [xMin, xMax, yMin, yMax]
 
       panels.add(
@@ -65,10 +63,10 @@ class Predictions {
           displayName: displayNames[i] as String,
           confidence: (confidences[i] as num).toDouble(),
           normalizedBox: Rect.fromLTRB(
-            bbox[0], // left (xMin)
-            bbox[2], // top (yMin)
-            bbox[1], // right (xMax)
-            bbox[3], // bottom (yMax)
+            bbox[0], // xMin
+            bbox[2], // yMin
+            bbox[1], // xMax
+            bbox[3], // yMax
           ),
         ),
       );
@@ -83,10 +81,51 @@ class Predictions {
     );
   }
 
-  /// Converts the predictions to a map for serialization.
-  ///
-  /// Returns a map containing all predictions and model metadata, suitable for storage
-  /// in Firestore or other data stores.
+  /// Sorts panels in reading order: top-to-bottom first, then left-to-right within rows.
+  static List<Panel> _sortPanelsInReadingOrder(List<Panel> panels) {
+    if (panels.isEmpty) return [];
+
+    // Working copies for sorting
+    final workingList = List<Panel>.from(panels);
+
+    // Grouping by "rows" based on vertical overlap/proximity
+    const rowTolerance = 0.05; // 5% of height
+
+    // Sort top-to-bottom by vertical center
+    workingList.sort(
+      (a, b) => a.normalizedCenterY.compareTo(b.normalizedCenterY),
+    );
+
+    final sorted = <Panel>[];
+    final currentRow = <Panel>[];
+
+    for (final panel in workingList) {
+      if (currentRow.isEmpty) {
+        currentRow.add(panel);
+      } else {
+        final rowReferenceY = currentRow.first.normalizedCenterY;
+        if ((panel.normalizedCenterY - rowReferenceY).abs() <= rowTolerance) {
+          currentRow.add(panel);
+        } else {
+          // Finish current row
+          currentRow.sort(
+            (a, b) => a.normalizedCenterX.compareTo(b.normalizedCenterX),
+          );
+          sorted.addAll(currentRow);
+          currentRow.clear();
+          currentRow.add(panel);
+        }
+      }
+    }
+    // Add last row
+    currentRow.sort(
+      (a, b) => a.normalizedCenterX.compareTo(b.normalizedCenterX),
+    );
+    sorted.addAll(currentRow);
+
+    return sorted;
+  }
+
   Map<String, dynamic> toMap() {
     return {
       'deployedModelId': deployedModelId,
@@ -97,9 +136,6 @@ class Predictions {
     };
   }
 
-  /// Creates a Predictions instance from a map representation.
-  ///
-  /// [map] A map containing predictions data, typically from a data store like Firestore.
   factory Predictions.fromMap(Map<String, dynamic> map) {
     final panelsData = map['panels'] as List<dynamic>? ?? [];
     final panels = panelsData.map((panelData) {
@@ -116,22 +152,5 @@ class Predictions {
   }
 
   @override
-  String toString() {
-    final buffer = StringBuffer();
-    buffer.writeln('Predictions(');
-    buffer.writeln('  deployedModelId: $deployedModelId,');
-    buffer.writeln('  model: $model,');
-    buffer.writeln('  modelDisplayName: $modelDisplayName,');
-    buffer.writeln('  modelVersionId: $modelVersionId,');
-    buffer.writeln('  panels: [');
-
-    for (final panel in panels) {
-      buffer.writeln('    $panel,');
-    }
-
-    buffer.writeln('  ]');
-    buffer.writeln(')');
-
-    return buffer.toString();
-  }
+  String toString() => 'Predictions(panels: ${panels.length})';
 }

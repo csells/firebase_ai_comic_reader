@@ -37,58 +37,81 @@ class ComicRepositoryFirebase implements ComicRepository {
 
   @override
   Future<void> addComic(String userId, Comic comic) async {
-    await _firestore
-        .collection('users')
-        .doc(userId)
-        .collection('comics')
-        .doc(comic.id)
-        .set(comic.toMap());
+    try {
+      await _firestore
+          .collection('users')
+          .doc(userId)
+          .collection('comics')
+          .doc(comic.id)
+          .set(comic.toMap());
+    } catch (e) {
+      debugPrint('Error adding comic (${comic.id}): $e');
+      rethrow;
+    }
   }
 
   @override
   Future<void> updateComic(String userId, Comic comic) async {
-    await _firestore
-        .collection('users')
-        .doc(userId)
-        .collection('comics')
-        .doc(comic.id)
-        .update(comic.toMap());
+    try {
+      await _firestore
+          .collection('users')
+          .doc(userId)
+          .collection('comics')
+          .doc(comic.id)
+          .update(comic.toMap());
+    } catch (e) {
+      debugPrint('Error updating comic (${comic.id}): $e');
+      rethrow;
+    }
   }
 
   @override
   Future<void> deleteComic(String userId, String comicId) async {
     try {
-      // Delete comic document from Firestore
+      // 1. Delete comic document from Firestore
       await _firestore
           .collection('users')
           .doc(userId)
           .collection('comics')
           .doc(comicId)
           .delete();
-    } catch (e) {
-      debugPrint('ComicReader: Firestore: Error deleting comic: $e');
-      rethrow;
-    }
-    try {
-      // Delete comic files from Firebase Storage
-      final comicRef = _storage.ref('comic_store/$userId/comics/$comicId');
-      final comicFiles = await comicRef.listAll();
 
-      // Delete all files in the comic folder
-      await Future.wait(comicFiles.items.map((item) => item.delete()));
+      // 2. Delete comic files from Firebase Storage
+      final comicRef = _storage.ref('comic_store/$userId/comics/$comicId');
+      try {
+        final comicFiles = await comicRef.listAll();
+        await Future.wait(
+          comicFiles.items.map(
+            (item) => item.delete().catchError((e) {
+              if (e is FirebaseException && e.code == 'object-not-found') {
+                return; // Ignore
+              }
+              throw e;
+            }),
+          ),
+        );
+      } catch (e) {
+        if (e is FirebaseException && e.code == 'object-not-found') {
+          // Parent folder not found is fine
+        } else {
+          rethrow;
+        }
+      }
+
+      // 3. Delete thumbnail from Firebase Storage
+      try {
+        await _storage
+            .ref('comic_store/$userId/thumbnails/$comicId.jpg')
+            .delete();
+      } catch (e) {
+        if (e is FirebaseException && e.code == 'object-not-found') {
+          // Ignore
+        } else {
+          rethrow;
+        }
+      }
     } catch (e) {
-      debugPrint(
-        'ComicReader: Firebase Storage: Error deleting comic files: $e',
-      );
-      rethrow;
-    }
-    try {
-      // Delete thumbnail from Firebase Storage
-      await _storage
-          .ref('comic_store/$userId/thumbnails/$comicId.jpg')
-          .delete();
-    } catch (e) {
-      debugPrint('ComicReader: Firebase Storage: Error deleting thumbnail: $e');
+      debugPrint('Error deleting comic ($comicId): $e');
       rethrow;
     }
   }
@@ -103,14 +126,19 @@ class ComicRepositoryFirebase implements ComicRepository {
     String comicId,
     int currentPage,
   ) async {
-    await _firestore
-        .collection('users')
-        .doc(userId)
-        .collection('comics')
-        .doc(comicId)
-        .update({
-          'currentPage': currentPage,
-          'lastReadDate': DateTime.now().toIso8601String(),
-        });
+    try {
+      await _firestore
+          .collection('users')
+          .doc(userId)
+          .collection('comics')
+          .doc(comicId)
+          .update({
+            'currentPage': currentPage,
+            'lastReadDate': DateTime.now().toIso8601String(),
+          });
+    } catch (e) {
+      debugPrint('Error updating current page ($comicId): $e');
+      rethrow;
+    }
   }
 }

@@ -6,7 +6,7 @@ import 'package:comic_reader/utils/auth_utils.dart' as auth_utils;
 import 'package:flutter/material.dart';
 
 import '../views/reader_view.dart';
-//import 'package:comic_reader/utils/prediction_utils.dart' as prediction_utils;
+// Finalized ReaderPage
 
 class ReaderPage extends StatefulWidget {
   final String comicId;

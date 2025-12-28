@@ -15,11 +15,11 @@ class Panel {
   final double confidence;
 
   /// Normalized bounding box coordinates (values between 0.0 and 1.0).
-  /// The coordinates are in the format: left = xMin, top = yMin, right = xMax, bottom = yMax
-  Rect normalizedBox;
+  /// [left, top, right, bottom]
+  final Rect normalizedBox;
 
   /// Optional pixel-based bounding box coordinates.
-  /// Only available after calling [convertToImageCoordinates].
+  /// This is typically derived from [normalizedBox] and image dimensions.
   Rect? pixelBox;
 
   Panel({
@@ -30,27 +30,31 @@ class Panel {
     this.pixelBox,
   });
 
+  /// The horizontal center of the panel in normalized coordinates.
+  double get normalizedCenterX => normalizedBox.left + normalizedBox.width / 2;
+
+  /// The vertical center of the panel in normalized coordinates.
+  double get normalizedCenterY => normalizedBox.top + normalizedBox.height / 2;
+
   factory Panel.fromJson(Map<String, dynamic> json) {
-    final bbox =
-        (json['bbox'] as List).map((e) => (e as num).toDouble()).toList();
-    // bbox: [xMin, xMax, yMin, yMax]
+    final bbox = (json['bbox'] as List)
+        .map((e) => (e as num).toDouble())
+        .toList();
+    // bbox order: [xMin, xMax, yMin, yMax]
     return Panel(
       id: json['id'] as String,
       displayName: json['displayName'] as String,
       confidence: (json['confidence'] as num).toDouble(),
       normalizedBox: Rect.fromLTRB(
-        bbox[0], // left (xMin)
-        bbox[2], // top (yMin)
-        bbox[1], // right (xMax)
-        bbox[3], // bottom (yMax)
+        bbox[0], // xMin
+        bbox[2], // yMin
+        bbox[1], // xMax
+        bbox[3], // yMax
       ),
     );
   }
 
-  /// Converts the normalized coordinates to pixel coordinates based on the image dimensions.
-  ///
-  /// [imageWidth] The width of the image in pixels.
-  /// [imageHeight] The height of the image in pixels.
+  /// Converts the normalized coordinates to pixel coordinates for a given image size.
   void convertToImageCoordinates(double imageWidth, double imageHeight) {
     pixelBox = Rect.fromLTRB(
       normalizedBox.left * imageWidth,
@@ -60,11 +64,8 @@ class Panel {
     );
   }
 
-  /// Converts the panel data to a map for serialization.
-  ///
-  /// Returns a map containing all panel properties, suitable for storage or transmission.
   Map<String, dynamic> toMap() {
-    final map = <String, dynamic>{
+    return {
       'id': id,
       'displayName': displayName,
       'confidence': confidence,
@@ -74,36 +75,19 @@ class Panel {
         'right': normalizedBox.right,
         'bottom': normalizedBox.bottom,
       },
+      if (pixelBox != null)
+        'pixelBox': {
+          'left': pixelBox!.left,
+          'top': pixelBox!.top,
+          'right': pixelBox!.right,
+          'bottom': pixelBox!.bottom,
+        },
     };
-
-    if (pixelBox != null) {
-      map['pixelBox'] = {
-        'left': pixelBox!.left,
-        'top': pixelBox!.top,
-        'right': pixelBox!.right,
-        'bottom': pixelBox!.bottom,
-      };
-    }
-
-    return map;
   }
 
-  /// Creates a Panel instance from a map representation.
-  ///
-  /// [map] A map containing panel properties, typically from deserialized data.
   factory Panel.fromMap(Map<String, dynamic> map) {
     final nb = map['normalizedBox'] as Map<String, dynamic>;
-    final pBox = map['pixelBox'] as Map<String, dynamic>?;
-
-    Rect? pixelRect;
-    if (pBox != null) {
-      pixelRect = Rect.fromLTRB(
-        (pBox['left'] as num).toDouble(),
-        (pBox['top'] as num).toDouble(),
-        (pBox['right'] as num).toDouble(),
-        (pBox['bottom'] as num).toDouble(),
-      );
-    }
+    final pb = map['pixelBox'] as Map<String, dynamic>?;
 
     return Panel(
       id: map['id'] as String,
@@ -115,18 +99,17 @@ class Panel {
         (nb['right'] as num).toDouble(),
         (nb['bottom'] as num).toDouble(),
       ),
-      pixelBox: pixelRect,
+      pixelBox: pb == null
+          ? null
+          : Rect.fromLTRB(
+              (pb['left'] as num).toDouble(),
+              (pb['top'] as num).toDouble(),
+              (pb['right'] as num).toDouble(),
+              (pb['bottom'] as num).toDouble(),
+            ),
     );
   }
 
   @override
-  String toString() {
-    return 'Panel(\n'
-        '  id: $id,\n'
-        '  displayName: $displayName,\n'
-        '  confidence: $confidence,\n'
-        '  normalizedBox: $normalizedBox,\n'
-        '  pixelBox: $pixelBox\n'
-        ')';
-  }
+  String toString() => 'Panel(id: $id, box: $normalizedBox)';
 }

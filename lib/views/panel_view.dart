@@ -34,7 +34,6 @@ class _PanelViewState extends State<PanelView> {
   ui.Image? _uiImage;
   Size? _imageSize;
   Size? _viewSize;
-  bool _panelsConverted = false;
 
   @override
   void initState() {
@@ -47,110 +46,66 @@ class _PanelViewState extends State<PanelView> {
     super.didUpdateWidget(oldWidget);
     if (widget.smartMode != oldWidget.smartMode ||
         widget.currentPanelIndex != oldWidget.currentPanelIndex) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        _jumpToPanel(widget.currentPanelIndex);
-      });
+      _scheduleJump();
     }
+  }
+
+  void _scheduleJump() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _jumpToPanel(widget.currentPanelIndex);
+    });
   }
 
   Future<void> _loadUiImage() async {
-    final completer = Completer<ui.Image>();
-    final stream = Image.network(widget.imageUrl)
-        .image
-        .resolve(const ImageConfiguration());
-    late final ImageStreamListener listener;
+    try {
+      final completer = Completer<ui.Image>();
+      final stream = Image.network(
+        widget.imageUrl,
+      ).image.resolve(const ImageConfiguration());
+      late final ImageStreamListener listener;
 
-    listener = ImageStreamListener((info, _) {
-      stream.removeListener(listener);
-      completer.complete(info.image);
-    }, onError: (error, stack) {
-      stream.removeListener(listener);
-      completer.completeError(error, stack);
-    });
-    stream.addListener(listener);
-
-    final loadedImage = await completer.future;
-    final imageWidth = loadedImage.width.toDouble();
-    final imageHeight = loadedImage.height.toDouble();
-
-    if (!mounted) return;
-
-    setState(() {
-      _uiImage = loadedImage;
-      _imageSize = Size(imageWidth, imageHeight);
-    });
-
-    _convertPanelsToPixelCoordinates(imageWidth, imageHeight);
-    _sortPanelsInReadingOrder();
-
-    if (widget.smartMode) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted) return;
-        _jumpToPanel(widget.currentPanelIndex);
-      });
-    }
-  }
-
-  void _convertPanelsToPixelCoordinates(double imageW, double imageH) {
-    if (_panelsConverted) return;
-    for (var panel in widget.panels) {
-      panel.convertToImageCoordinates(imageW, imageH);
-    }
-    _panelsConverted = true;
-  }
-
-  void _sortPanelsInReadingOrder() {
-    if (widget.panels.isEmpty) return;
-
-    const rowTolerance = 50.0;
-    final panelsWithCenter = widget.panels.map((p) {
-      final box = p.pixelBox!;
-      return (
-        panel: p,
-        centerX: box.left + box.width / 2,
-        centerY: box.top + box.height / 2
+      listener = ImageStreamListener(
+        (info, _) {
+          stream.removeListener(listener);
+          completer.complete(info.image);
+        },
+        onError: (error, stack) {
+          stream.removeListener(listener);
+          completer.completeError(error, stack);
+        },
       );
-    }).toList();
+      stream.addListener(listener);
 
-    // Sort top-to-bottom by centerY
-    panelsWithCenter.sort((a, b) => a.centerY.compareTo(b.centerY));
+      final loadedImage = await completer.future;
+      if (!mounted) return;
 
-    final rows = <List<(Panel, double)>>[];
-    var currentRow = <(Panel, double)>[];
+      final imageWidth = loadedImage.width.toDouble();
+      final imageHeight = loadedImage.height.toDouble();
 
-    for (var item in panelsWithCenter) {
-      if (currentRow.isEmpty) {
-        currentRow.add((item.panel, item.centerX));
-      } else {
-        final firstRect = currentRow.first.$1.pixelBox!;
-        final firstCenterY = firstRect.top + firstRect.height / 2;
-        if ((item.centerY - firstCenterY).abs() <= rowTolerance) {
-          currentRow.add((item.panel, item.centerX));
-        } else {
-          rows.add(currentRow);
-          currentRow = [(item.panel, item.centerX)];
-        }
+      setState(() {
+        _uiImage = loadedImage;
+        _imageSize = Size(imageWidth, imageHeight);
+      });
+
+      // Prepare panels for display
+      for (var panel in widget.panels) {
+        panel.convertToImageCoordinates(imageWidth, imageHeight);
       }
-    }
-    if (currentRow.isNotEmpty) rows.add(currentRow);
 
-    final sortedPanels = <Panel>[];
-    for (final row in rows) {
-      row.sort((a, b) => a.$2.compareTo(b.$2)); // left-to-right
-      sortedPanels.addAll(row.map((e) => e.$1));
+      if (widget.smartMode) {
+        _scheduleJump();
+      }
+    } catch (e) {
+      debugPrint('PanelView: Error loading image: $e');
     }
-
-    widget.panels
-      ..clear()
-      ..addAll(sortedPanels);
   }
 
   void _jumpToPanel(int index) {
     if (!widget.smartMode ||
         _uiImage == null ||
         _imageSize == null ||
-        widget.panels.isEmpty ||
-        _viewSize == null) {
+        _viewSize == null ||
+        widget.panels.isEmpty) {
       _transformationController.value = Matrix4.identity();
       return;
     }
@@ -167,8 +122,10 @@ class _PanelViewState extends State<PanelView> {
 
     final viewWidth = _viewSize!.width;
     final viewHeight = _viewSize!.height;
-    final scale =
-        math.min(viewWidth / pixelBox.width, viewHeight / pixelBox.height);
+    final scale = math.min(
+      viewWidth / pixelBox.width,
+      viewHeight / pixelBox.height,
+    );
 
     final panelCenterX = pixelBox.left + pixelBox.width / 2;
     final panelCenterY = pixelBox.top + pixelBox.height / 2;
@@ -191,8 +148,6 @@ class _PanelViewState extends State<PanelView> {
           return const Center(child: CircularProgressIndicator());
         }
 
-        // NOTE: Wrap in a black Container so that, when in smart mode,
-        // the image is clipped to the current panel.
         return Container(
           color: Colors.black,
           child: InteractiveViewer(
@@ -215,10 +170,7 @@ class _PanelViewState extends State<PanelView> {
   }
 
   CustomPainter _buildNormalModePainter() {
-    return PanelImagePainter(
-      uiImage: _uiImage!,
-      panels: widget.panels,
-    );
+    return PanelImagePainter(uiImage: _uiImage!, panels: widget.panels);
   }
 
   CustomPainter _buildSmartModePainter() {
@@ -244,10 +196,8 @@ class PanelImagePainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    // Draw the entire image.
     canvas.drawImage(uiImage, Offset.zero, Paint());
 
-    // Only draw debug boxes if debug mode is enabled
     if (kDebugPanelBoundaries) {
       final redPaint = Paint()
         ..color = Colors.red
@@ -273,10 +223,7 @@ class SmartPanelImagePainter extends CustomPainter {
   final ui.Image uiImage;
   final Rect panelRect;
 
-  SmartPanelImagePainter({
-    required this.uiImage,
-    required this.panelRect,
-  });
+  SmartPanelImagePainter({required this.uiImage, required this.panelRect});
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -296,7 +243,6 @@ class SmartPanelImagePainter extends CustomPainter {
     canvas.drawImage(uiImage, Offset.zero, Paint());
     canvas.restore();
 
-    // Only draw debug box if debug mode is enabled
     if (kDebugPanelBoundaries) {
       final outline = Paint()
         ..color = Colors.red

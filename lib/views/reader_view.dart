@@ -110,7 +110,7 @@ class ReaderViewState extends State<ReaderView> {
 
   @override
   Widget build(BuildContext context) {
-    if (widget.comic.pageCount == null || widget.comic.pageCount! <= 0) {
+    if (widget.comic.pageCount <= 0) {
       return const Center(child: Text('No pages available'));
     }
 
@@ -123,17 +123,14 @@ class ReaderViewState extends State<ReaderView> {
 
     // Grab the Gemini summary for the current page
     final String? currentPageSummaryRaw =
-        (widget.comic.pageSummaries != null &&
-            _currentPageIndex < widget.comic.pageSummaries!.length)
-        ? widget.comic.pageSummaries![_currentPageIndex][_selectedLanguage]
+        (_currentPageIndex < widget.comic.pageSummaries.length)
+        ? widget.comic.pageSummaries[_currentPageIndex][_selectedLanguage]
         : null;
 
     // Grab the Panel summary if in smart mode
     String? currentPanelSummaryRaw;
-    if (_smartMode &&
-        widget.comic.panelSummaries != null &&
-        _currentPageIndex < widget.comic.panelSummaries!.length) {
-      final pageData = widget.comic.panelSummaries![_currentPageIndex];
+    if (_smartMode && _currentPageIndex < widget.comic.panelSummaries.length) {
+      final pageData = widget.comic.panelSummaries[_currentPageIndex];
       // Safely extract panels list from the map structure
       final List? panels = pageData['panels'] as List?;
 
@@ -218,9 +215,20 @@ class ReaderViewState extends State<ReaderView> {
                 );
 
                 if (context.mounted && confirmed == true) {
-                  await _repository.deleteComic(widget.userId, widget.comic.id);
-                  if (context.mounted) {
-                    Navigator.pop(context); // Go back to library
+                  try {
+                    await _repository.deleteComic(
+                      widget.userId,
+                      widget.comic.id,
+                    );
+                    if (context.mounted) {
+                      Navigator.pop(context); // Go back to library
+                    }
+                  } catch (e) {
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text('Failed to delete comic: $e')),
+                      );
+                    }
                   }
                 }
               }
@@ -385,8 +393,8 @@ class ReaderViewState extends State<ReaderView> {
               child: Slider(
                 value: _currentPageIndex.toDouble(),
                 min: 0,
-                max: (widget.comic.pageCount! - 1).toDouble(),
-                divisions: widget.comic.pageCount! - 1,
+                max: (widget.comic.pageCount - 1).toDouble(),
+                divisions: widget.comic.pageCount - 1,
                 label: (_currentPageIndex + 1).toString(),
                 onChanged: (value) {
                   _pageController.jumpToPage(value.round());
@@ -454,7 +462,7 @@ class ReaderViewState extends State<ReaderView> {
         });
       } else {
         // If at last panel, try to go to next page's first panel
-        if (_currentPageIndex < (widget.comic.pageCount! - 1)) {
+        if (_currentPageIndex < (widget.comic.pageCount - 1)) {
           _goToFirstPanelOnLoad = true; // We'll want the first panel there
           _pageController.nextPage(
             duration: const Duration(milliseconds: 150),
@@ -464,7 +472,7 @@ class ReaderViewState extends State<ReaderView> {
       }
     } else {
       // Normal mode: go to next page if possible
-      if (_currentPageIndex < widget.comic.pageCount! - 1) {
+      if (_currentPageIndex < widget.comic.pageCount - 1) {
         _pageController.nextPage(
           duration: const Duration(milliseconds: 150),
           curve: Curves.easeInOut,

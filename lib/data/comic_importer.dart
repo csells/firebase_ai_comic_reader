@@ -1,27 +1,24 @@
 import 'dart:async';
-import 'dart:convert';
-import 'dart:io';
-import 'dart:ui';
 
 import 'package:archive/archive.dart' as zip;
-import 'package:comic_reader/data/comic_repository_firebase.dart';
-import 'package:comic_reader/models/comic.dart';
-import 'package:comic_reader/models/comic_predictions.dart';
-import 'package:comic_reader/models/panel.dart';
-import 'package:comic_reader/models/predictions.dart';
-import 'package:firebase_ai/firebase_ai.dart';
 import 'package:firebase_auth/firebase_auth.dart' as auth;
 import 'package:firebase_storage/firebase_storage.dart' as fs;
 import 'package:flutter/foundation.dart';
 import 'package:image/image.dart' as img;
 import 'package:path/path.dart' as path;
-import 'package:rar/rar.dart';
+
+import '../models/comic.dart';
+import '../models/comic_predictions.dart';
+import '../models/panel.dart';
+import '../models/predictions.dart';
+import 'comic_repository_firebase.dart';
+import 'gemini_service.dart';
+import 'rar_extractor/rar_extractor.dart';
 
 class ComicImporter {
   final fs.FirebaseStorage _storage = fs.FirebaseStorage.instance;
   final ComicRepositoryFirebase _repository = ComicRepositoryFirebase();
 
-  // Toggle whether we do panel predictions or skip them.
   final bool enablePredictions;
 
   ComicImporter({this.enablePredictions = true});
@@ -91,78 +88,33 @@ class ComicImporter {
     }
 
     try {
+      debugPrint('Decompressing comic archive: $fileName');
       // 1) Decompress archive
-      List<zip.ArchiveFile> imageFiles;
+      List<zip.ArchiveFile> imageFiles = [];
 
-      if (path.extension(fileName).toLowerCase() == '.cbr') {
-        // RAR support via 'rar' package (requires file I/O)
-        final tempDir = await Directory.systemTemp.createTemp(
-          'comic_reader_rar_',
-        );
-        try {
-          final tempRarFile = File(path.join(tempDir.path, 'temp.cbr'));
-          await tempRarFile.writeAsBytes(comicBytes);
-
-          final extractDir = Directory(path.join(tempDir.path, 'extracted'));
-          await extractDir.create();
-
-          // Extract using Rar class static method
-          final result = await Rar.extractRarFile(
-            rarFilePath: tempRarFile.path,
-            destinationPath: extractDir.path,
-          );
-
-          if (result['success'] != true) {
-            throw Exception('RAR extraction failed: ${result['message']}');
-          }
-
-          // Read extracted files into ArchiveFiles
-          imageFiles = [];
-          if (await extractDir.exists()) {
-            await for (final entity in extractDir.list(recursive: true)) {
-              if (entity is File) {
-                // Filter out directories if list returns them, but check isFile
-                // Also check standard ignore list
-                final filename = path.basename(entity.path);
-                if (_shouldSkipFile(filename.toLowerCase()) ||
-                    !_isAllowedExtension(filename.toLowerCase())) {
-                  continue;
-                }
-
-                final bytes = await entity.readAsBytes();
-                final relativePath = path.relative(
-                  entity.path,
-                  from: extractDir.path,
-                );
-                // Create ArchiveFile. mode/compress defaults are fine.
-                final archiveFile = zip.ArchiveFile(
-                  relativePath,
-                  bytes.length,
-                  bytes,
-                );
-                imageFiles.add(archiveFile);
-              }
-            }
-          }
-        } finally {
-          // Cleanup
-          if (await tempDir.exists()) {
-            await tempDir.delete(recursive: true);
-          }
-        }
-
-        // Sort
-        imageFiles.sort(
-          (a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()),
-        );
+      final fileExt = path.extension(fileName).toLowerCase();
+      if (fileExt == '.cbr') {
+        debugPrint('RAR archive detected (.cbr). Using RarExtractor.');
+        final extractor = getRarExtractor();
+        imageFiles.addAll(await extractor.extractImages(comicBytes));
       } else {
+        debugPrint('Zip archive detected (.cbz). Using ZipDecoder.');
         // Default to Zip (CBZ)
-        final archive = zip.ZipDecoder().decodeBytes(comicBytes);
-        imageFiles = _extractImagesFromArchive(archive);
+        try {
+          final archive = zip.ZipDecoder().decodeBytes(comicBytes);
+          imageFiles = _extractImagesFromArchive(archive);
+          debugPrint(
+            'Zip extraction complete. Found ${imageFiles.length} images.',
+          );
+        } catch (e) {
+          debugPrint('Error during Zip decoding: $e');
+          rethrow;
+        }
       }
 
       checkCancellation();
 
+      debugPrint('Final filtered image count: ${imageFiles.length}');
       // 2) Extract relevant image files (already filtered above)
       // Check count
       if (imageFiles.isEmpty) {
@@ -192,7 +144,6 @@ class ComicImporter {
         debugPrint('Processing page ${i + 1}/$totalFiles: $filename');
 
         final imageBytes = Uint8List.fromList(file.content as List<int>);
-        final base64Image = base64Encode(imageBytes);
 
         // 1. Upload
         final ref = _storage.ref(innerFilePath);
@@ -202,7 +153,7 @@ class ComicImporter {
 
         // 2. Analyze
         try {
-          final analysis = await _analyzePage(base64Image);
+          final analysis = await _analyzePage(imageBytes);
 
           // Save Page Summaries
           pageSummaries[i] = analysis['summaries'] as Map<String, String>;
@@ -254,14 +205,19 @@ class ComicImporter {
       debugPrint('Comic saved to Firestore: $comicId');
 
       return comicId;
-    } catch (e) {
+    } catch (e, stackTrace) {
       // Cleanup partial uploads on error or cancellation
-      if (isCancelled) {
+      debugPrint('Import failed: $e');
+      try {
         await _cleanupIfCancelled(user.uid, comicId);
-      } else {
-        await _cleanupIfCancelled(user.uid, comicId);
+      } catch (cleanupError) {
+        debugPrint(
+          'Cleanup failed (expected if no files uploaded): $cleanupError',
+        );
+        // Do NOT rethrow cleanupError, it would mask the original error 'e'
       }
-      rethrow;
+      // Rethrow the original error and stack trace
+      Error.throwWithStackTrace(e, stackTrace);
     } finally {
       await progressStream.close();
     }
@@ -324,9 +280,13 @@ class ComicImporter {
       throw Exception('Failed to decode first image for thumbnail.');
     }
 
-    final resizedThumbnail = img.copyResize(originalImage, width: 200);
+    final resizedThumbnail = img.copyResize(
+      originalImage,
+      width: 400,
+      interpolation: img.Interpolation.linear,
+    );
     final thumbnailBytes = Uint8List.fromList(
-      img.encodeJpg(resizedThumbnail, quality: 85),
+      img.encodeJpg(resizedThumbnail, quality: 90),
     );
 
     if (isCancelled()) {
@@ -338,127 +298,11 @@ class ComicImporter {
     debugPrint('Thumbnail uploaded: $thumbnailPath');
   }
 
+  final GeminiService _geminiService = GeminiService();
+
   /// Analyzes a comic page using Gemini.
-  /// Returns a `Map<String, dynamic>` with:
-  /// - 'summaries': `Map<String, String>` (en, es, fr)
-  /// - 'panels': `List<Panel>`
-  /// - 'panel_summaries': `List<Map<String, String>>`
-  Future<Map<String, dynamic>> _analyzePage(String base64Image) async {
-    final responseSchema = Schema.object(
-      properties: {
-        'en': Schema.string(description: 'English summary of the page'),
-        'es': Schema.string(description: 'Spanish summary of the page'),
-        'fr': Schema.string(description: 'French summary of the page'),
-        'panels': Schema.array(
-          items: Schema.object(
-            properties: {
-              'box_2d': Schema.object(
-                properties: {
-                  'ymin': Schema.integer(description: 'Top coordinate 0-1000'),
-                  'xmin': Schema.integer(description: 'Left coordinate 0-1000'),
-                  'ymax': Schema.integer(
-                    description: 'Bottom coordinate 0-1000',
-                  ),
-                  'xmax': Schema.integer(
-                    description: 'Right coordinate 0-1000',
-                  ),
-                },
-              ),
-              'en': Schema.string(description: 'English summary of the panel'),
-              'es': Schema.string(description: 'Spanish summary of the panel'),
-              'fr': Schema.string(description: 'French summary of the panel'),
-            },
-          ),
-        ),
-      },
-    );
-
-    final schemaJson = jsonEncode(responseSchema.toJson());
-
-    final systemInstruction = Content.system(
-      'You are an expert OCR and translation model specializing in comic books. '
-      'Your task is to analyze a comic book page and: \n'
-      '1. Extract the text and arrange it narratively. \n'
-      '2. Summarize the story/content in three languages: English (en), Spanish (es), and French (fr). \n'
-      '3. Detect all comic panels and provide their bounding boxes in normalized coordinates [0, 1000]. \n'
-      '4. Provide a narrative summary for each panel in the same three languages. \n'
-      '\n'
-      'IMPORTANT: You MUST return a valid JSON object strictly following this schema: \n'
-      '$schemaJson \n'
-      '\n'
-      'If no text or content is present, return empty strings for the summaries.',
-    );
-
-    final model = FirebaseAI.googleAI().generativeModel(
-      model: 'gemini-3-flash-preview',
-      systemInstruction: systemInstruction,
-      generationConfig: GenerationConfig(
-        responseMimeType: 'application/json',
-        responseSchema: responseSchema,
-      ),
-    );
-
-    try {
-      final response = await model.generateContent([
-        Content.multi([
-          InlineDataPart('image/jpeg', base64Decode(base64Image)),
-          TextPart('Analyze this comic page.'),
-        ]),
-      ]);
-
-      final contentText = response.text;
-      if (contentText == null) {
-        return {
-          'summaries': {'en': '', 'es': '', 'fr': ''},
-        };
-      }
-
-      final parsed = jsonDecode(contentText) as Map<String, dynamic>;
-      final result = <String, dynamic>{
-        'summaries': {
-          'en': parsed['en']?.toString() ?? '',
-          'es': parsed['es']?.toString() ?? '',
-          'fr': parsed['fr']?.toString() ?? '',
-        },
-      };
-
-      if (parsed.containsKey('panels')) {
-        final List<dynamic> panelsJson = parsed['panels'] as List;
-        final List<Panel> panels = [];
-        final List<Map<String, String>> panelSummaries = [];
-
-        for (var j = 0; j < panelsJson.length; j++) {
-          final panelData = panelsJson[j] as Map<String, dynamic>;
-          final box = panelData['box_2d'] as Map<String, dynamic>;
-
-          final yMin = (box['ymin'] as num).toDouble() / 1000.0;
-          final xMin = (box['xmin'] as num).toDouble() / 1000.0;
-          final yMax = (box['ymax'] as num).toDouble() / 1000.0;
-          final xMax = (box['xmax'] as num).toDouble() / 1000.0;
-
-          panels.add(
-            Panel(
-              id: 'panel_$j',
-              displayName: 'panel',
-              confidence: 1.0,
-              normalizedBox: Rect.fromLTRB(xMin, yMin, xMax, yMax),
-            ),
-          );
-
-          panelSummaries.add({
-            'en': panelData['en']?.toString() ?? '',
-            'es': panelData['es']?.toString() ?? '',
-            'fr': panelData['fr']?.toString() ?? '',
-          });
-        }
-        result['panels'] = panels;
-        result['panel_summaries'] = panelSummaries;
-      }
-      return result;
-    } catch (e) {
-      debugPrint('Gemini Error: $e');
-      rethrow;
-    }
+  Future<Map<String, dynamic>> _analyzePage(Uint8List imageBytes) async {
+    return _geminiService.analyzePage(imageBytes);
   }
 
   /// Deletes partial upload if import is cancelled or error.
