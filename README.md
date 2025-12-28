@@ -7,7 +7,9 @@ interactive, AI-enhanced reading experience.
 Need a sample comic to test with? Any cbr or cbz file will work. You can also
 check out the comics from the `comics-for-testing` directory in this repository.
 
-<video controls src="readme/screen-recording.mov" title="Title"></video>
+<video controls
+src="https://github.com/csells/firebase_ai_comic_reader/raw/refs/heads/main/readme/screen-recording.mov"
+title="Title"></video>
 
 ## AI Features
 
