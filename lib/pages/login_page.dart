@@ -36,8 +36,9 @@ class _LoginPageState extends State<LoginPage> {
       debugPrint('Sign in successful for: $email');
     } on FirebaseAuthException catch (e) {
       debugPrint('Sign in failed: ${e.code}');
+      // 'user-not-found' is for older Firebase versions, 'invalid-credential' is the newer consolidated code.
       if (e.code == 'user-not-found' || e.code == 'invalid-credential') {
-        // If user not found (or invalid credentials), try to create the account.
+        // If user not found (or potentially invalid credentials), try to create the account.
         try {
           debugPrint('Attempting to create account for: $email');
           await _auth.createUserWithEmailAndPassword(
@@ -47,7 +48,13 @@ class _LoginPageState extends State<LoginPage> {
           debugPrint('Account created and signed in for: $email');
         } on FirebaseAuthException catch (createError) {
           debugPrint('Account creation failed: ${createError.code}');
-          setState(() => _errorMessage = createError.message);
+          if (createError.code == 'email-already-in-use') {
+            // This happens if the original signIn failed with 'invalid-credential'
+            // but the user actually exists (wrong password).
+            setState(() => _errorMessage = 'Invalid email or password.');
+          } else {
+            setState(() => _errorMessage = createError.message);
+          }
         }
       } else {
         setState(() => _errorMessage = e.message);
