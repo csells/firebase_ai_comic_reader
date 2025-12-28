@@ -50,20 +50,20 @@ class GeminiService {
 
     final schemaJson = jsonEncode(responseSchema.toJson());
 
-    final systemInstruction = Content.system(
-      'You are an expert OCR and translation model specializing in comic books. '
-      'Your task is to analyze a comic book page and: \n'
-      '1. Extract the text and arrange it narratively. \n'
-      '2. Summarize the story/content in three languages: English (en), Spanish (es), and French (fr). \n'
-      '3. Detect all comic panels and provide their bounding boxes in normalized coordinates [0, 1000]. \n'
-      '4. Provide a narrative summary for each panel in the same three languages. \n'
-      '5. IMPORTANT: You MUST return the panels in their natural reading order (typically top-to-bottom, left-to-right). \n'
-      '\n'
-      'IMPORTANT: You MUST return a valid JSON object strictly following this schema: \n'
-      '$schemaJson \n'
-      '\n'
-      'If no text or content is present, return empty strings for the summaries.',
-    );
+    final systemInstruction = Content.system('''
+You are an expert OCR and translation model specializing in comic books. 
+Your task is to analyze a comic book page and:
+1. Extract the text and arrange it narratively.
+2. Summarize the story/content in three languages: English (en), Spanish (es), and French (fr).
+3. Detect all comic panels and provide their bounding boxes in normalized coordinates [0, 1000].
+4. Provide a narrative summary for each panel in the same three languages.
+5. Return the panels in their natural reading order (typically top-to-bottom, left-to-right).
+
+Return a valid JSON object strictly following this schema:
+$schemaJson
+
+If no text or content is present, return empty strings for the summaries.
+''');
 
     final model =
         _mockModel ??
