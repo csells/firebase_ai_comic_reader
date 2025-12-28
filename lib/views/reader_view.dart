@@ -97,22 +97,19 @@ class ReaderViewState extends State<ReaderView> {
     // Grab the Gemini summary for the current page
     final currentPageSummaryRaw =
         (_currentPageIndex < widget.comic.pageSummaries.length)
-        ? widget.comic.pageSummaries[_currentPageIndex][_selectedLanguage]
+        ? widget.comic.pageSummaries[_currentPageIndex].forLanguage(
+            _selectedLanguage,
+          )
         : null;
 
     // Grab the Panel summary if in panel mode
     String? currentPanelSummaryRaw;
     if (_panelMode && _currentPageIndex < widget.comic.panelSummaries.length) {
       final pageData = widget.comic.panelSummaries[_currentPageIndex];
-      // Safely extract panels list from the map structure
-      final panels = pageData['panels'] as List?;
-
-      if (panels != null && _currentPanelIndex < panels.length) {
-        final panelMap = panels[_currentPanelIndex];
-        if (panelMap is Map) {
-          currentPanelSummaryRaw = panelMap[_selectedLanguage]?.toString();
-        }
-      }
+      currentPanelSummaryRaw = pageData.getSummary(
+        _currentPanelIndex,
+        _selectedLanguage,
+      );
     }
 
     final displayedSummary = _panelMode

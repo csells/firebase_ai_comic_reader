@@ -1,6 +1,6 @@
-// ignore_for_file: avoid_dynamic_calls
-
+import 'page_panel_summaries.dart';
 import 'predictions.dart';
+import 'translated_text.dart';
 
 class Comic {
   Comic({
@@ -19,36 +19,29 @@ class Comic {
   }) : lastReadDate = lastReadDate ?? DateTime.now();
 
   factory Comic.fromMap(Map<String, dynamic> map) => Comic(
-    id: map['id'] ?? '',
-    title: map['title'] ?? '',
-    thumbnailImage: map['thumbnailImage'],
-    author: map['author'],
-    series: map['series'],
-    pageCount: map['pageCount'] ?? 0,
-    currentPage: map['currentPage'] ?? 0,
+    id: map['id']?.toString() ?? '',
+    title: map['title']?.toString() ?? '',
+    thumbnailImage: map['thumbnailImage']?.toString(),
+    author: map['author']?.toString(),
+    series: map['series']?.toString(),
+    pageCount: (map['pageCount'] as num?)?.toInt() ?? 0,
+    currentPage: (map['currentPage'] as num?)?.toInt() ?? 0,
     lastReadDate: map['lastReadDate'] != null
-        ? DateTime.parse(map['lastReadDate'])
+        ? DateTime.parse(map['lastReadDate'] as String)
         : null,
-    pageImages: List<String>.from(map['pageImages'] ?? []),
-    predictions: (map['predictions']?['pagePredictions'] as List? ?? [])
-        .map((m) => Predictions.fromMap(m as Map<String, dynamic>))
+    pageImages: List<String>.from(map['pageImages'] as List? ?? []),
+    predictions:
+        ((map['predictions'] as Map<String, dynamic>?)?['pagePredictions']
+                    as List? ??
+                [])
+            .map((m) => Predictions.fromMap(m as Map<String, dynamic>))
+            .toList(),
+    pageSummaries: (map['pageSummaries'] as List? ?? [])
+        .map((e) => TranslatedText.fromMap(e as Map<String, dynamic>))
         .toList(),
-    pageSummaries: map['pageSummaries'] != null
-        ? (map['pageSummaries'] as List)
-              .map((e) => Map<String, String>.from(e))
-              .toList()
-        : [],
-    panelSummaries: map['panelSummaries'] != null
-        ? (map['panelSummaries'] as List).map((pageMap) {
-            final m = Map<String, dynamic>.from(pageMap);
-            if (m['panels'] != null) {
-              m['panels'] = (m['panels'] as List)
-                  .map((panel) => Map<String, String>.from(panel))
-                  .toList();
-            }
-            return m;
-          }).toList()
-        : [],
+    panelSummaries: (map['panelSummaries'] as List? ?? [])
+        .map((e) => PagePanelSummaries.fromMap(e as Map<String, dynamic>))
+        .toList(),
   );
 
   final String id;
@@ -61,15 +54,15 @@ class Comic {
   DateTime lastReadDate;
   List<String> pageImages;
 
-  /// Panel predictions for each page
+  /// Panel predictions for each page.
   List<Predictions> predictions;
 
-  /// Summaries for each page (language code -> text)
-  List<Map<String, String>> pageSummaries;
+  /// Summaries for each page (translated into multiple languages).
+  List<TranslatedText> pageSummaries;
 
-  /// Summaries for each panel on each page
-  /// Structure: `[ { 'panels': [ { 'en': '...' }, ... ] }, ... ]`
-  List<Map<String, dynamic>> panelSummaries;
+  /// Summaries for each panel on each page (translated into multiple
+  /// languages).
+  List<PagePanelSummaries> panelSummaries;
 
   Map<String, dynamic> toMap() => {
     'id': id,
@@ -85,7 +78,7 @@ class Comic {
     'predictions': {
       'pagePredictions': predictions.map((p) => p.toMap()).toList(),
     },
-    'pageSummaries': pageSummaries,
-    'panelSummaries': panelSummaries,
+    'pageSummaries': pageSummaries.map((s) => s.toMap()).toList(),
+    'panelSummaries': panelSummaries.map((p) => p.toMap()).toList(),
   };
 }

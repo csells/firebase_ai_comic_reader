@@ -8,8 +8,10 @@ import 'package:image/image.dart' as img;
 import 'package:path/path.dart' as path;
 
 import '../models/comic.dart';
+import '../models/page_panel_summaries.dart';
 import '../models/panel.dart';
 import '../models/predictions.dart';
+import '../models/translated_text.dart';
 import 'comic_repository_firebase.dart';
 import 'gemini_service.dart';
 import 'rar_extractor/rar_extractor.dart';
@@ -122,16 +124,8 @@ class ComicImporter {
       // Phase 1: Upload & Analyze images => 0% .. 100%
       final totalFiles = imageFiles.length;
       final pageUrls = <String>[];
-      final pageSummaries = List<Map<String, String>>.generate(
-        totalFiles,
-        (_) => {},
-        growable: false,
-      );
-      final panelSummaries = List<Map<String, dynamic>>.generate(
-        totalFiles,
-        (_) => {'panels': <Map<String, String>>[]},
-        growable: false,
-      );
+      final pageSummaries = List<TranslatedText?>.filled(totalFiles, null);
+      final panelSummaries = List<PagePanelSummaries?>.filled(totalFiles, null);
       final predictions = <Predictions>[];
 
       for (var i = 0; i < totalFiles; i++) {
@@ -154,7 +148,12 @@ class ComicImporter {
           final analysis = await _analyzePage(imageBytes);
 
           // Save Page Summaries
-          pageSummaries[i] = analysis['summaries'] as Map<String, String>;
+          final summariesMap = analysis['summaries'] as Map<String, String>;
+          pageSummaries[i] = TranslatedText(
+            en: summariesMap['en'] ?? '',
+            es: summariesMap['es'] ?? '',
+            fr: summariesMap['fr'] ?? '',
+          );
 
           // Save Panels & Panel Summaries
           if (analysis.containsKey('panels')) {
@@ -164,9 +163,19 @@ class ComicImporter {
             // Extract Panel Summaries
             final panelSummaryMaps =
                 analysis['panel_summaries'] as List<Map<String, String>>;
-            panelSummaries[i] = {'panels': panelSummaryMaps};
+            final panelTexts = panelSummaryMaps
+                .map(
+                  (m) => TranslatedText(
+                    en: m['en'] ?? '',
+                    es: m['es'] ?? '',
+                    fr: m['fr'] ?? '',
+                  ),
+                )
+                .toList();
+            panelSummaries[i] = PagePanelSummaries(panels: panelTexts);
           } else {
             predictions.add(Predictions(panels: []));
+            panelSummaries[i] = const PagePanelSummaries();
           }
         } catch (e) {
           debugPrint('Fatal error analyzing page $i: $e');
@@ -194,8 +203,12 @@ class ComicImporter {
         pageCount: pageUrls.length,
         pageImages: pageUrls,
         predictions: predictions,
-        pageSummaries: pageSummaries,
-        panelSummaries: panelSummaries,
+        pageSummaries: pageSummaries
+            .map((s) => s ?? const TranslatedText())
+            .toList(),
+        panelSummaries: panelSummaries
+            .map((p) => p ?? const PagePanelSummaries())
+            .toList(),
       );
 
       await _repository.addComic(userId, comic);
