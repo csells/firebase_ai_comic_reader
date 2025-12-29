@@ -6,52 +6,58 @@ import 'package:flutter/foundation.dart' show immutable;
 /// Spanish, and French.
 @immutable
 class TranslatedText {
-  const TranslatedText({this.en = '', this.es = '', this.fr = ''});
+  const TranslatedText({Map<String, String> translations = const {}})
+    : _translations = translations;
 
-  factory TranslatedText.fromMap(Map<String, dynamic> map) => TranslatedText(
-    en: map['en']?.toString() ?? '',
-    es: map['es']?.toString() ?? '',
-    fr: map['fr']?.toString() ?? '',
-  );
+  factory TranslatedText.fromMap(Map<String, dynamic> map) =>
+      TranslatedText(translations: Map<String, String>.from(map));
+
+  final Map<String, String> _translations;
 
   /// English text.
-  final String en;
+  String get en => _translations['en'] ?? '';
 
   /// Spanish text.
-  final String es;
+  String get es => _translations['es'] ?? '';
 
   /// French text.
-  final String fr;
+  String get fr => _translations['fr'] ?? '';
 
   /// Returns the text for the given language code.
-  ///
-  /// Supported codes: 'en', 'es', 'fr'. Returns empty string for unknown codes.
-  String forLanguage(String languageCode) => switch (languageCode) {
-    'en' => en,
-    'es' => es,
-    'fr' => fr,
-    _ => '',
-  };
+  String forLanguage(String languageCode) => _translations[languageCode] ?? '';
 
   /// Returns true if all translations are empty.
-  bool get isEmpty => en.isEmpty && es.isEmpty && fr.isEmpty;
+  bool get isEmpty => _translations.values.every((v) => v.isEmpty);
 
   /// Returns true if any translation is non-empty.
   bool get isNotEmpty => !isEmpty;
 
-  Map<String, String> toMap() => {'en': en, 'es': es, 'fr': fr};
+  /// Returns a new [TranslatedText] with the given translation added.
+  TranslatedText withTranslation(String languageCode, String text) {
+    final newTranslations = Map<String, String>.from(_translations);
+    newTranslations[languageCode] = text;
+    return TranslatedText(translations: newTranslations);
+  }
+
+  Map<String, String> toMap() => _translations;
 
   @override
-  String toString() => 'TranslatedText(en: $en, es: $es, fr: $fr)';
+  String toString() => 'TranslatedText(translations: $_translations)';
 
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
-      other is TranslatedText &&
-          en == other.en &&
-          es == other.es &&
-          fr == other.fr;
+      other is TranslatedText && _mapEquals(_translations, other._translations);
 
   @override
-  int get hashCode => Object.hash(en, es, fr);
+  int get hashCode =>
+      Object.hashAll(_translations.keys) ^ Object.hashAll(_translations.values);
+
+  static bool _mapEquals<K, V>(Map<K, V> a, Map<K, V> b) {
+    if (a.length != b.length) return false;
+    for (final key in a.keys) {
+      if (!b.containsKey(key) || b[key] != a[key]) return false;
+    }
+    return true;
+  }
 }

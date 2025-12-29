@@ -148,12 +148,8 @@ class ComicImporter {
           final analysis = await _analyzePage(imageBytes);
 
           // Save Page Summaries
-          final summariesMap = analysis['summaries'] as Map<String, String>;
-          pageSummaries[i] = TranslatedText(
-            en: summariesMap['en'] ?? '',
-            es: summariesMap['es'] ?? '',
-            fr: summariesMap['fr'] ?? '',
-          );
+          final pageSummary = analysis['summary'] as String;
+          pageSummaries[i] = TranslatedText(translations: {'en': pageSummary});
 
           // Save Panels & Panel Summaries
           if (analysis.containsKey('panels')) {
@@ -161,16 +157,10 @@ class ComicImporter {
             predictions.add(Predictions(panels: panelsList));
 
             // Extract Panel Summaries
-            final panelSummaryMaps =
-                analysis['panel_summaries'] as List<Map<String, String>>;
-            final panelTexts = panelSummaryMaps
-                .map(
-                  (m) => TranslatedText(
-                    en: m['en'] ?? '',
-                    es: m['es'] ?? '',
-                    fr: m['fr'] ?? '',
-                  ),
-                )
+            final panelSummaryStrings =
+                analysis['panel_summaries'] as List<String>;
+            final panelTexts = panelSummaryStrings
+                .map((s) => TranslatedText(translations: {'en': s}))
                 .toList();
             panelSummaries[i] = PagePanelSummaries(panels: panelTexts);
           } else {

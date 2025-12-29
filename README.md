@@ -21,10 +21,11 @@ check out the comics from the `comics-for-testing` directory in this repository.
   reading order (typically top-to-bottom, left-to-right), ensuring a seamless
   narrative flow.
 
-### 3. Multi-Lingual AI Summaries
-- **Content Summaries**: Gemini analyzes every page and panel to provide
-  narrative context in three languages: English (EN), Spanish (ES), and French
-  (FR).
+### 3. Smart Translation & Summaries
+- **Initial Pass**: Gemini quickly analyzes pages to provide English summaries and
+  detect panels.
+- **On-Demand Translation**: Switch languages (ES, FR) in the reader to trigger
+  real-time AI translation, with results cached for the session.
 
 ## Setup Instructions
 
@@ -61,7 +62,7 @@ check out the comics from the `comics-for-testing` directory in this repository.
     Logic](https://console.firebase.google.com/project/_/ailogic) section in the
     console.
 2.  **Link API Key**: Connect a **Gemini Developer API Key**. The app uses
-    `gemini-3-flash-preview` for high-speed vision capabilities.
+    `gemini-3-flash-preview` for high-speed vision and translation capabilities.
 
 ### 3. Local Development Setup
 1.  **Firebase CLI**: Ensure you have the [Firebase
@@ -87,16 +88,20 @@ check out the comics from the `comics-for-testing` directory in this repository.
 
 ## AI Implementation Insights
 
-### Single-Pass AI Analysis
+### Optimized AI Analysis
 The core logic resides in `GeminiService`, which leverages the
-`FirebaseAI.googleAI()` SDK to send comic pages to Gemini in a single-pass
-analysis. This efficiency allows us to extract:
-1.  **OCR Text**: Narrative extraction of all speech bubbles and text.
-2.  **Page Summaries**: High-level context for the entire page in 3 languages.
-3.  **Panel Detection**: Normalized bounding box coordinates `[ymin, xmin, ymax,
+`FirebaseAI.googleAI()` SDK for an efficient two-tier processing flow:
+1.  **Initial Analysis (Single-Pass)**: When importing, pages are analyzed once to
+    extract OCR text, a page summary in English, and panel bounding boxes.
+2.  **On-Demand Translation**: To reduce latency and costs, translations for other
+    languages (Spanish, French, etc.) are performed on-the-fly when requested by
+    the user in the reader view.
+
+Extraction includes:
+1.  **Narrative summaries**: High-level context for the entire page.
+2.  **Panel Detection**: Normalized bounding box coordinates `[ymin, xmin, ymax,
     xmax]` on a 0-1000 scale.
-4.  **Panel Reading Order**: The prompt explicitly instructs the LLM to return
-    panels in their natural reading order, eliminating the need for complex
-    app-side sorting algorithms.
-5.  **Panel-Specific Summaries**: Unique narrative descriptions for every
-    detected panel in 3 languages.
+3.  **Panel Reading Order**: The prompt explicitly instructs the LLM to return
+    panels in their natural reading order.
+4.  **Panel-Specific Summaries**: Unique narrative descriptions for every
+    detected panel.

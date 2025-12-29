@@ -14,15 +14,13 @@ class GeminiService {
   /// Analyzes a comic page using Gemini.
   ///
   /// Returns a [Map] containing:
-  /// - 'summaries': `Map<String, String>` (language codes to summary text)
+  /// - 'summary': `String` (English summary)
   /// - 'panels': `List<Panel>` (detected panel bounding boxes)
-  /// - 'panel_summaries': `List<Map<String, String>>` (per-panel translations)
+  /// - 'panel_summaries': `List<String>` (per-panel summaries in English)
   Future<Map<String, dynamic>> analyzePage(Uint8List imageBytes) async {
     final responseSchema = Schema.object(
       properties: {
-        'en': Schema.string(description: 'English summary of the page'),
-        'es': Schema.string(description: 'Spanish summary of the page'),
-        'fr': Schema.string(description: 'French summary of the page'),
+        'summary': Schema.string(description: 'English summary of the page'),
         'panels': Schema.array(
           items: Schema.object(
             properties: {
@@ -38,9 +36,9 @@ class GeminiService {
                   ),
                 },
               ),
-              'en': Schema.string(description: 'English summary of the panel'),
-              'es': Schema.string(description: 'Spanish summary of the panel'),
-              'fr': Schema.string(description: 'French summary of the panel'),
+              'summary': Schema.string(
+                description: 'English summary of the panel',
+              ),
             },
           ),
         ),
@@ -50,12 +48,12 @@ class GeminiService {
     final schemaJson = jsonEncode(responseSchema.toJson());
 
     final systemInstruction = Content.system('''
-You are an expert OCR and translation model specializing in comic books. 
+You are an expert OCR and narrative analysis model specializing in comic books. 
 Your task is to analyze a comic book page and:
 1. Extract the text and arrange it narratively.
-2. Summarize the story/content in three languages: English (en), Spanish (es), and French (fr).
+2. Summarize the story/content in English.
 3. Detect all comic panels and provide their bounding boxes in normalized coordinates [0, 1000].
-4. Provide a narrative summary for each panel in the same three languages.
+4. Provide a narrative summary for each panel in English.
 5. Return the panels in their natural reading order (typically top-to-bottom, left-to-right).
 
 Return a valid JSON object strictly following this schema:
@@ -90,25 +88,14 @@ If no text or content is present, return empty strings for the summaries.
 
       final parsed = jsonDecode(contentText) as Map<String, dynamic>;
 
-      // Basic validation of expected keys
-      if (!parsed.containsKey('en') ||
-          !parsed.containsKey('es') ||
-          !parsed.containsKey('fr')) {
-        throw Exception('Invalid Gemini response: Missing summary fields');
-      }
-
       final result = <String, dynamic>{
-        'summaries': {
-          'en': parsed['en']?.toString() ?? '',
-          'es': parsed['es']?.toString() ?? '',
-          'fr': parsed['fr']?.toString() ?? '',
-        },
+        'summary': parsed['summary']?.toString() ?? '',
       };
 
       if (parsed.containsKey('panels')) {
         final panelsJson = parsed['panels'] as List;
         final panels = <Panel>[];
-        final panelSummaries = <Map<String, String>>[];
+        final panelSummaries = <String>[];
 
         for (var j = 0; j < panelsJson.length; j++) {
           final panelData = panelsJson[j] as Map<String, dynamic>;
@@ -138,21 +125,81 @@ If no text or content is present, return empty strings for the summaries.
             ),
           );
 
-          panelSummaries.add({
-            'en': panelData['en']?.toString() ?? '',
-            'es': panelData['es']?.toString() ?? '',
-            'fr': panelData['fr']?.toString() ?? '',
-          });
+          panelSummaries.add(panelData['summary']?.toString() ?? '');
         }
         result['panels'] = panels;
         result['panel_summaries'] = panelSummaries;
       } else {
         result['panels'] = <Panel>[];
-        result['panel_summaries'] = <Map<String, String>>[];
+        result['panel_summaries'] = <String>[];
       }
       return result;
     } catch (e) {
       debugPrint('Gemini Service Error: $e');
+      rethrow;
+    }
+  }
+
+  /// Translates a list of texts into the target language.
+  /// Returns a list of translated strings in the same order.
+  Future<List<String>> translate(
+    List<String> texts,
+    String targetLanguage,
+  ) async {
+    if (texts.isEmpty) return [];
+
+    final responseSchema = Schema.object(
+      properties: {
+        'translations': Schema.array(
+          items: Schema.string(description: 'Translated text'),
+        ),
+      },
+    );
+
+    final schemaJson = jsonEncode(responseSchema.toJson());
+
+    final systemInstruction = Content.system('''
+You are a professional translator.
+Translate the following list of strings into the target language: $targetLanguage.
+Maintain the order and the tone of the original texts.
+Return a valid JSON object strictly following this schema:
+$schemaJson
+''');
+
+    final model =
+        _mockModel ??
+        FirebaseAI.googleAI().generativeModel(
+          model: 'gemini-3-flash-preview',
+          systemInstruction: systemInstruction,
+          generationConfig: GenerationConfig(
+            responseMimeType: 'application/json',
+            responseSchema: responseSchema,
+          ),
+        );
+
+    try {
+      final response = await model.generateContent([
+        Content.text('Translate these strings:\n${jsonEncode(texts)}'),
+      ]);
+
+      final contentText = response.text;
+      if (contentText == null) {
+        throw Exception('Gemini translation response returned no text content');
+      }
+
+      final parsed = jsonDecode(contentText) as Map<String, dynamic>;
+      final translations = List<String>.from(parsed['translations'] as List);
+
+      if (translations.length != texts.length) {
+        debugPrint(
+          'Warning: Translation count mismatch. Expected ${texts.length}, '
+          'got ${translations.length}',
+        );
+      }
+
+      return translations;
+    } catch (e) {
+      debugPrint('Gemini Translation Error: $e');
       rethrow;
     }
   }

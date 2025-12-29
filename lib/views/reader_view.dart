@@ -5,7 +5,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../data/comic_repository_firebase.dart';
+import '../data/gemini_service.dart';
 import '../models/comic.dart';
+import '../models/page_panel_summaries.dart';
+import '../models/translated_text.dart';
 import 'panel_view.dart';
 
 class ReaderView extends StatefulWidget {
@@ -19,8 +22,12 @@ class ReaderView extends StatefulWidget {
 
 class ReaderViewState extends State<ReaderView> {
   final ComicRepositoryFirebase _repository = ComicRepositoryFirebase();
+  final GeminiService _geminiService = GeminiService();
 
   late int _currentPageIndex;
+
+  /// Track pending translations by "$pageIndex-$languageCode"
+  final Set<String> _pendingTranslations = {};
 
   /// Whether we’re in panel-by-panel panel mode.
   bool _panelMode = false;
@@ -61,6 +68,10 @@ class ReaderViewState extends State<ReaderView> {
     unawaited(
       _repository.updateCurrentPage(widget.userId, widget.comic.id, index),
     );
+
+    if (_selectedLanguage != 'en') {
+      unawaited(_translateIfNeeded(index));
+    }
   }
 
   /// Toggles between page mode (page-based) and panel mode (panel-based).
@@ -214,31 +225,42 @@ class ReaderViewState extends State<ReaderView> {
                   Row(
                     children: [
                       Expanded(
-                        child: Text(
-                          displayedSummary?.isNotEmpty ?? false
-                              ? displayedSummary!
-                              : (_panelMode
-                                    ? (currentPagePredictions == null ||
-                                              currentPagePredictions
-                                                  .panels
-                                                  .isEmpty
-                                          ? 'Summaries unavailable because '
-                                                'panel detection failed for '
-                                                'this page.'
-                                          : 'No specific summary for this '
-                                                'panel.')
-                                    : 'No page summary available. '
-                                          '(Did the import finish?)'),
-                          style: TextStyle(
-                            fontSize: 18,
-                            color: displayedSummary?.isNotEmpty ?? false
-                                ? Colors.black
-                                : Colors.grey[600],
-                            fontStyle: displayedSummary?.isNotEmpty ?? false
-                                ? FontStyle.normal
-                                : FontStyle.italic,
-                          ),
-                        ),
+                        child:
+                            _pendingTranslations.contains(
+                              '$_currentPageIndex-$_selectedLanguage',
+                            )
+                            ? const Center(
+                                child: Padding(
+                                  padding: EdgeInsets.all(8),
+                                  child: CircularProgressIndicator(),
+                                ),
+                              )
+                            : Text(
+                                displayedSummary?.isNotEmpty ?? false
+                                    ? displayedSummary!
+                                    : (_panelMode
+                                          ? (currentPagePredictions == null ||
+                                                    currentPagePredictions
+                                                        .panels
+                                                        .isEmpty
+                                                ? 'Summaries unavailable because '
+                                                      'panel detection failed for '
+                                                      'this page.'
+                                                : 'No specific summary for this '
+                                                      'panel.')
+                                          : 'No page summary available. '
+                                                '(Did the import finish?)'),
+                                style: TextStyle(
+                                  fontSize: 18,
+                                  color: displayedSummary?.isNotEmpty ?? false
+                                      ? Colors.black
+                                      : Colors.grey[600],
+                                  fontStyle:
+                                      displayedSummary?.isNotEmpty ?? false
+                                      ? FontStyle.normal
+                                      : FontStyle.italic,
+                                ),
+                              ),
                       ),
                       const SizedBox(width: 8),
                       DropdownButtonHideUnderline(
@@ -250,10 +272,17 @@ class ReaderViewState extends State<ReaderView> {
                             color: Colors.black,
                           ),
                           onChanged: (newValue) {
-                            if (newValue != null) {
+                            if (newValue != null &&
+                                newValue != _selectedLanguage) {
                               setState(() {
                                 _selectedLanguage = newValue;
                               });
+
+                              if (_selectedLanguage != 'en') {
+                                unawaited(
+                                  _translateIfNeeded(_currentPageIndex),
+                                );
+                              }
                             }
                           },
                           items: const [
@@ -416,5 +445,103 @@ class ReaderViewState extends State<ReaderView> {
         _updatePage(_currentPageIndex + 1);
       }
     }
+  }
+
+  /// Translates the page and panel summaries if necessary.
+  Future<void> _translateIfNeeded([int? pageIndex]) async {
+    final targetPageIndex = pageIndex ?? _currentPageIndex;
+    if (_selectedLanguage == 'en') return;
+
+    final lang = _selectedLanguage;
+    final requestId = '$targetPageIndex-$lang';
+
+    // Check if translation already exists
+    final pageTranslated =
+        targetPageIndex < widget.comic.pageSummaries.length &&
+        widget.comic.pageSummaries[targetPageIndex]
+            .forLanguage(lang)
+            .isNotEmpty;
+
+    final panelsTranslated =
+        targetPageIndex < widget.comic.panelSummaries.length &&
+        widget.comic.panelSummaries[targetPageIndex].panels.every(
+          (p) => p.forLanguage(lang).isNotEmpty,
+        );
+
+    if (pageTranslated && panelsTranslated) return;
+
+    // Check if already in progress
+    if (_pendingTranslations.contains(requestId)) return;
+
+    if (mounted && targetPageIndex == _currentPageIndex) {
+      setState(() {
+        // Just to trigger UI refresh for the spinner
+      });
+    }
+
+    _pendingTranslations.add(requestId);
+
+    try {
+      final textsToTranslate = <String>[];
+
+      // 1. Page Summary
+      if (targetPageIndex < widget.comic.pageSummaries.length) {
+        textsToTranslate.add(widget.comic.pageSummaries[targetPageIndex].en);
+      }
+
+      // 2. Panel Summaries
+      if (targetPageIndex < widget.comic.panelSummaries.length) {
+        textsToTranslate.addAll(
+          widget.comic.panelSummaries[targetPageIndex].panels.map((p) => p.en),
+        );
+      }
+
+      if (textsToTranslate.isEmpty) {
+        _pendingTranslations.remove(requestId);
+        return;
+      }
+
+      final results = await _geminiService.translate(textsToTranslate, lang);
+
+      if (results.length == textsToTranslate.length) {
+        var resultIdx = 0;
+
+        // Update Page Summary
+        if (targetPageIndex < widget.comic.pageSummaries.length) {
+          widget.comic.pageSummaries[targetPageIndex] = widget
+              .comic
+              .pageSummaries[targetPageIndex]
+              .withTranslation(lang, results[resultIdx++]);
+        }
+
+        // Update Panel Summaries
+        if (targetPageIndex < widget.comic.panelSummaries.length) {
+          final currentPanels =
+              widget.comic.panelSummaries[targetPageIndex].panels;
+          final updatedPanels = <TranslatedText>[];
+          for (var i = 0; i < currentPanels.length; i++) {
+            updatedPanels.add(
+              currentPanels[i].withTranslation(lang, results[resultIdx++]),
+            );
+          }
+          widget.comic.panelSummaries[targetPageIndex] = PagePanelSummaries(
+            panels: updatedPanels,
+          );
+        }
+      }
+    } on Exception catch (e) {
+      debugPrint('Translation error: $e');
+    } finally {
+      _pendingTranslations.remove(requestId);
+      if (mounted && targetPageIndex == _currentPageIndex) {
+        setState(() {});
+      }
+    }
+  }
+
+  @override
+  void setState(VoidCallback fn) {
+    if (!mounted) return;
+    super.setState(fn);
   }
 }
