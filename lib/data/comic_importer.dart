@@ -89,95 +89,25 @@ class ComicImporter {
     }
 
     try {
-      debugPrint('Decompressing comic archive: $fileName');
-      // 1) Decompress archive
-      var imageFiles = <zip.ArchiveFile>[];
-
-      final fileExt = path.extension(fileName).toLowerCase();
-      if (fileExt == '.cbr') {
-        debugPrint('RAR archive detected (.cbr). Using RarExtractor.');
-        final extractor = getRarExtractor();
-        imageFiles.addAll(await extractor.extractImages(comicBytes));
-      } else {
-        debugPrint('Zip archive detected (.cbz). Using ZipDecoder.');
-        // Default to Zip (CBZ)
-        try {
-          final archive = zip.ZipDecoder().decodeBytes(comicBytes);
-          imageFiles = _extractImagesFromArchive(archive);
-          debugPrint(
-            'Zip extraction complete. Found ${imageFiles.length} images.',
-          );
-        } catch (e) {
-          debugPrint('Error during Zip decoding: $e');
-          rethrow;
-        }
-      }
-
+      final imageFiles = await _processArchive(comicBytes, fileName);
       checkCancellation();
 
-      debugPrint('Final filtered image count: ${imageFiles.length}');
-      // 2) Extract relevant image files (already filtered above) Check count
       if (imageFiles.isEmpty) {
         throw Exception('No valid image files found in the provided archive.');
       }
 
-      // Phase 1: Upload & Analyze images => 0% .. 100%
-      final totalFiles = imageFiles.length;
-      final pageUrls = <String>[];
-      final pageSummaries = List<TranslatedText?>.filled(totalFiles, null);
-      final panelSummaries = List<PagePanelSummaries?>.filled(totalFiles, null);
-      final predictions = <Predictions>[];
+      final pageData = await _uploadAndAnalyzePages(
+        imageFiles,
+        comicRootPath,
+        progressStream,
+        checkCancellation,
+      );
 
-      for (var i = 0; i < totalFiles; i++) {
-        checkCancellation();
-        final file = imageFiles[i];
-        final filename = path.basename(file.name);
-        final innerFilePath = '$comicRootPath/$filename';
-        debugPrint('Processing page ${i + 1}/$totalFiles: $filename');
+      final pageUrls = pageData.urls;
+      final summaries = pageData.summaries;
+      final panelSummaries = pageData.panelSummaries;
+      final predictions = pageData.predictions;
 
-        final imageBytes = Uint8List.fromList(file.content as List<int>);
-
-        // 1. Upload
-        final ref = _storage.ref(innerFilePath);
-        await ref.putData(imageBytes);
-        final downloadUrl = await ref.getDownloadURL();
-        pageUrls.add(downloadUrl);
-
-        // 2. Analyze
-        try {
-          final analysis = await _analyzePage(imageBytes);
-
-          // Save Page Summaries
-          final pageSummary = analysis['summary'] as String;
-          pageSummaries[i] = TranslatedText(translations: {'en': pageSummary});
-
-          // Save Panels & Panel Summaries
-          if (analysis.containsKey('panels')) {
-            final panelsList = analysis['panels'] as List<Panel>;
-            predictions.add(Predictions(panels: panelsList));
-
-            // Extract Panel Summaries
-            final panelSummaryStrings =
-                analysis['panel_summaries'] as List<String>;
-            final panelTexts = panelSummaryStrings
-                .map((s) => TranslatedText(translations: {'en': s}))
-                .toList();
-            panelSummaries[i] = PagePanelSummaries(panels: panelTexts);
-          } else {
-            predictions.add(Predictions(panels: []));
-            panelSummaries[i] = const PagePanelSummaries();
-          }
-        } catch (e) {
-          debugPrint('Fatal error analyzing page $i: $e');
-          rethrow; // Surface to the user immediately
-        }
-
-        // 3. Progress
-        final progress = (i + 1) / totalFiles;
-        progressStream.add(progress);
-      }
-
-      // Generate & upload thumbnail
       await _createThumbnail(
         imageFiles.first,
         thumbnailPath,
@@ -193,12 +123,8 @@ class ComicImporter {
         pageCount: pageUrls.length,
         pageImages: pageUrls,
         predictions: predictions,
-        pageSummaries: pageSummaries
-            .map((s) => s ?? const TranslatedText())
-            .toList(),
-        panelSummaries: panelSummaries
-            .map((p) => p ?? const PagePanelSummaries())
-            .toList(),
+        pageSummaries: summaries,
+        panelSummaries: panelSummaries,
       );
 
       await _repository.addComic(userId, comic);
@@ -221,6 +147,100 @@ class ComicImporter {
     } finally {
       await progressStream.close();
     }
+  }
+
+  Future<List<zip.ArchiveFile>> _processArchive(
+    Uint8List comicBytes,
+    String fileName,
+  ) async {
+    debugPrint('Decompressing comic archive: $fileName');
+    final imageFiles = <zip.ArchiveFile>[];
+    final fileExt = path.extension(fileName).toLowerCase();
+
+    if (fileExt == '.cbr') {
+      debugPrint('RAR archive detected (.cbr). Using RarExtractor.');
+      final extractor = getRarExtractor();
+      imageFiles.addAll(await extractor.extractImages(comicBytes));
+    } else {
+      debugPrint('Zip archive detected (.cbz). Using ZipDecoder.');
+      try {
+        final archive = zip.ZipDecoder().decodeBytes(comicBytes);
+        imageFiles.addAll(_extractImagesFromArchive(archive));
+        debugPrint(
+          'Zip extraction complete. Found ${imageFiles.length} images.',
+        );
+      } catch (e) {
+        debugPrint('Error during Zip decoding: $e');
+        rethrow;
+      }
+    }
+    return imageFiles;
+  }
+
+  Future<
+    ({
+      List<String> urls,
+      List<TranslatedText> summaries,
+      List<PagePanelSummaries> panelSummaries,
+      List<Predictions> predictions,
+    })
+  >
+  _uploadAndAnalyzePages(
+    List<zip.ArchiveFile> imageFiles,
+    String comicRootPath,
+    StreamController<double> progressStream,
+    VoidCallback checkCancellation,
+  ) async {
+    final totalFiles = imageFiles.length;
+    final pageUrls = <String>[];
+    final pageSummaries = <TranslatedText>[];
+    final panelSummaries = <PagePanelSummaries>[];
+    final predictions = <Predictions>[];
+
+    for (var i = 0; i < totalFiles; i++) {
+      checkCancellation();
+      final file = imageFiles[i];
+      final filename = path.basename(file.name);
+      final innerFilePath = '$comicRootPath/$filename';
+      debugPrint('Processing page ${i + 1}/$totalFiles: $filename');
+
+      final imageBytes = Uint8List.fromList(file.content as List<int>);
+
+      // 1. Upload
+      final ref = _storage.ref(innerFilePath);
+      await ref.putData(imageBytes);
+      final downloadUrl = await ref.getDownloadURL();
+      pageUrls.add(downloadUrl);
+
+      // 2. Analyze
+      final analysis = await _analyzePage(imageBytes);
+      final pageSummary = analysis['summary'] as String;
+      pageSummaries.add(TranslatedText(translations: {'en': pageSummary}));
+
+      if (analysis.containsKey('panels')) {
+        final panelsList = analysis['panels'] as List<Panel>;
+        predictions.add(Predictions(panels: panelsList));
+
+        final panelSummaryStrings = analysis['panel_summaries'] as List<String>;
+        final panelTexts = panelSummaryStrings
+            .map((s) => TranslatedText(translations: {'en': s}))
+            .toList();
+        panelSummaries.add(PagePanelSummaries(panels: panelTexts));
+      } else {
+        predictions.add(Predictions(panels: []));
+        panelSummaries.add(const PagePanelSummaries());
+      }
+
+      final progress = (i + 1) / totalFiles;
+      progressStream.add(progress);
+    }
+
+    return (
+      urls: pageUrls,
+      summaries: pageSummaries,
+      panelSummaries: panelSummaries,
+      predictions: predictions,
+    );
   }
 
   /// Extract images from the CBZ archive while ignoring known irrelevant files.

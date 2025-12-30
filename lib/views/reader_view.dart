@@ -25,25 +25,10 @@ class ReaderViewState extends State<ReaderView> {
   final GeminiService _geminiService = GeminiService();
 
   late int _currentPageIndex;
-
-  /// Track pending translations by "$pageIndex-$languageCode"
   final Set<String> _pendingTranslations = {};
-
-  /// Whether we’re in panel-by-panel panel mode.
   bool _panelMode = false;
-
-  /// Which panel (0-based index) we’re currently focused on in panel mode.
   int _currentPanelIndex = 0;
-
-  /// Selected language for summaries.
   String _selectedLanguage = 'en';
-
-  /// Whether we’re showing the Gemini summary text.
-  bool _showSummaries = true;
-
-  /// We remember the user’s summary toggle setting before switching to panel
-  /// mode, so we can restore it when exiting panel mode.
-  bool _oldShowSummaries = true;
 
   @override
   void initState() {
@@ -51,18 +36,12 @@ class ReaderViewState extends State<ReaderView> {
     _currentPageIndex = widget.comic.currentPage;
   }
 
-  /// Updates the current page and optionally the panel index.
   void _updatePage(int index, {int? panelIndex}) {
     if (index < 0 || index >= widget.comic.pageCount) return;
 
     setState(() {
       _currentPageIndex = index;
-      if (panelIndex != null) {
-        _currentPanelIndex = panelIndex;
-      } else {
-        // Default to first panel on new page unless otherwise specified
-        _currentPanelIndex = 0;
-      }
+      _currentPanelIndex = panelIndex ?? 0;
     });
 
     unawaited(
@@ -74,20 +53,13 @@ class ReaderViewState extends State<ReaderView> {
     }
   }
 
-  /// Toggles between page mode (page-based) and panel mode (panel-based).
   void _togglePanelMode() {
     setState(() {
       if (!_panelMode) {
-        // Switching from page to panel mode:
-        _oldShowSummaries = _showSummaries;
-        _showSummaries = true; // Enabled in panel mode to show panel summaries
         _panelMode = true;
         _currentPanelIndex = 0;
       } else {
-        // Switching from panel mode back to page mode:
         _panelMode = false;
-        _showSummaries =
-            _oldShowSummaries; // Restore prior summary toggle state
         _currentPanelIndex = 0;
       }
     });
@@ -99,13 +71,11 @@ class ReaderViewState extends State<ReaderView> {
       return const Center(child: Text('No pages available'));
     }
 
-    // Grab the Predictions for this page, if available
     final currentPagePredictions =
         _currentPageIndex < widget.comic.predictions.length
         ? widget.comic.predictions[_currentPageIndex]
         : null;
 
-    // Grab the Gemini summary for the current page
     final currentPageSummaryRaw =
         (_currentPageIndex < widget.comic.pageSummaries.length)
         ? widget.comic.pageSummaries[_currentPageIndex].forLanguage(
@@ -113,7 +83,6 @@ class ReaderViewState extends State<ReaderView> {
           )
         : null;
 
-    // Grab the Panel summary if in panel mode
     String? currentPanelSummaryRaw;
     if (_panelMode && _currentPageIndex < widget.comic.panelSummaries.length) {
       final pageData = widget.comic.panelSummaries[_currentPageIndex];
@@ -129,32 +98,10 @@ class ReaderViewState extends State<ReaderView> {
 
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-      appBar: AppBar(
-        title: Text(
-          widget.comic.title,
-          overflow: TextOverflow.ellipsis,
-          style: const TextStyle(fontSize: 16),
-        ),
-        centerTitle: false,
-        actions: [
-          // Panel-mode button
-          IconButton(
-            icon: Icon(
-              _panelMode ? Icons.grid_view : Icons.description,
-              color: _panelMode ? Colors.blue : null,
-            ),
-            onPressed: _togglePanelMode,
-            tooltip: _panelMode
-                ? 'Switch to Page Mode'
-                : 'Switch to Panel Mode',
-          ),
-          const SizedBox(width: 8),
-        ],
-      ),
+      appBar: _buildAppBar(),
       body: Focus(
         autofocus: true,
         onKeyEvent: (node, event) {
-          // Simple arrow-key navigation
           if (event is KeyDownEvent) {
             if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
               _goToPrevious();
@@ -213,168 +160,34 @@ class ReaderViewState extends State<ReaderView> {
                 ),
               ),
             ),
-
-            // Always show the Gemini summary.
-            Container(
-              width: double.infinity,
-              color: _panelMode ? Colors.blue[50] : Colors.grey[200],
-              padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 12),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child:
-                            _pendingTranslations.contains(
-                              '$_currentPageIndex-$_selectedLanguage',
-                            )
-                            ? const Center(
-                                child: Padding(
-                                  padding: EdgeInsets.all(8),
-                                  child: CircularProgressIndicator(),
-                                ),
-                              )
-                            : Text(
-                                displayedSummary?.isNotEmpty ?? false
-                                    ? displayedSummary!
-                                    : (_panelMode
-                                          ? (currentPagePredictions == null ||
-                                                    currentPagePredictions
-                                                        .panels
-                                                        .isEmpty
-                                                ? 'Summaries unavailable because '
-                                                      'panel detection failed for '
-                                                      'this page.'
-                                                : 'No specific summary for this '
-                                                      'panel.')
-                                          : 'No page summary available. '
-                                                '(Did the import finish?)'),
-                                style: TextStyle(
-                                  fontSize: 18,
-                                  color: displayedSummary?.isNotEmpty ?? false
-                                      ? Colors.black
-                                      : Colors.grey[600],
-                                  fontStyle:
-                                      displayedSummary?.isNotEmpty ?? false
-                                      ? FontStyle.normal
-                                      : FontStyle.italic,
-                                ),
-                              ),
-                      ),
-                      const SizedBox(width: 8),
-                      DropdownButtonHideUnderline(
-                        child: DropdownButton<String>(
-                          value: _selectedLanguage,
-                          icon: const Icon(Icons.language, size: 20),
-                          style: const TextStyle(
-                            fontSize: 14,
-                            color: Colors.black,
-                          ),
-                          onChanged: (newValue) {
-                            if (newValue != null &&
-                                newValue != _selectedLanguage) {
-                              setState(() {
-                                _selectedLanguage = newValue;
-                              });
-
-                              if (_selectedLanguage != 'en') {
-                                unawaited(
-                                  _translateIfNeeded(_currentPageIndex),
-                                );
-                              }
-                            }
-                          },
-                          items: const [
-                            DropdownMenuItem(value: 'en', child: Text('EN')),
-                            DropdownMenuItem(value: 'es', child: Text('ES')),
-                            DropdownMenuItem(value: 'fr', child: Text('FR')),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
+            _SummaryOverlay(
+              displayedSummary: displayedSummary,
+              panelMode: _panelMode,
+              isPending: _pendingTranslations.contains(
+                '$_currentPageIndex-$_selectedLanguage',
               ),
+              selectedLanguage: _selectedLanguage,
+              onLanguageChanged: (newValue) {
+                if (newValue != null && newValue != _selectedLanguage) {
+                  setState(() {
+                    _selectedLanguage = newValue;
+                  });
+                  if (_selectedLanguage != 'en') {
+                    unawaited(_translateIfNeeded(_currentPageIndex));
+                  }
+                }
+              },
+              predictionsFailed:
+                  _panelMode &&
+                  (currentPagePredictions == null ||
+                      currentPagePredictions.panels.isEmpty),
             ),
-
-            // Page/Panel slider
-            Padding(
-              padding: EdgeInsets.symmetric(
-                horizontal: MediaQuery.of(context).size.width * 0.1,
-                vertical: 16,
-              ),
-              child: Builder(
-                builder: (context) {
-                  final globalReadingItems = <({int page, int? panel})>[];
-                  var currentGlobalIndex = 0;
-
-                  if (_panelMode) {
-                    for (var i = 0; i < widget.comic.pageCount; i++) {
-                      final pagePreds = widget.comic.predictions.length > i
-                          ? widget.comic.predictions[i]
-                          : null;
-                      final panels = pagePreds?.panels ?? [];
-                      if (panels.isEmpty) {
-                        if (i == _currentPageIndex) {
-                          currentGlobalIndex = globalReadingItems.length;
-                        }
-                        globalReadingItems.add((page: i, panel: null));
-                      } else {
-                        for (var j = 0; j < panels.length; j++) {
-                          if (i == _currentPageIndex &&
-                              j == _currentPanelIndex) {
-                            currentGlobalIndex = globalReadingItems.length;
-                          }
-                          globalReadingItems.add((page: i, panel: j));
-                        }
-                      }
-                    }
-                  }
-
-                  final sliderValue = _panelMode
-                      ? currentGlobalIndex.toDouble()
-                      : _currentPageIndex.toDouble();
-                  final sliderMax = _panelMode
-                      ? (globalReadingItems.length - 1).toDouble()
-                      : (widget.comic.pageCount - 1).toDouble();
-                  final sliderDivisions = _panelMode
-                      ? globalReadingItems.length - 1
-                      : widget.comic.pageCount - 1;
-
-                  String sliderLabel;
-                  if (_panelMode) {
-                    final item = globalReadingItems[currentGlobalIndex];
-                    if (item.panel != null) {
-                      sliderLabel =
-                          'Page ${item.page + 1}, Panel ${item.panel! + 1}';
-                    } else {
-                      sliderLabel = 'Page ${item.page + 1}';
-                    }
-                  } else {
-                    sliderLabel = 'Page ${_currentPageIndex + 1}';
-                  }
-
-                  return Slider(
-                    value: sliderValue,
-                    min: 0,
-                    max: sliderMax > 0 ? sliderMax : 0,
-                    divisions: sliderDivisions > 0 ? sliderDivisions : 1,
-                    label: sliderLabel,
-                    onChanged: (value) {
-                      if (_panelMode) {
-                        final idx = value.round();
-                        if (idx >= 0 && idx < globalReadingItems.length) {
-                          final item = globalReadingItems[idx];
-                          _updatePage(item.page, panelIndex: item.panel ?? 0);
-                        }
-                      } else {
-                        _updatePage(value.round());
-                      }
-                    },
-                  );
-                },
-              ),
+            _ReaderSlider(
+              comic: widget.comic,
+              panelMode: _panelMode,
+              currentPageIndex: _currentPageIndex,
+              currentPanelIndex: _currentPanelIndex,
+              onUpdatePage: _updatePage,
             ),
           ],
         ),
@@ -382,8 +195,6 @@ class ReaderViewState extends State<ReaderView> {
     );
   }
 
-  /// Navigates to the previous panel (if in panel mode), or previous page (if
-  /// in page mode).
   void _goToPrevious() {
     final currentPreds = _currentPageIndex < widget.comic.predictions.length
         ? widget.comic.predictions[_currentPageIndex]
@@ -392,35 +203,25 @@ class ReaderViewState extends State<ReaderView> {
 
     if (_panelMode && currentPreds != null && totalPanels > 0) {
       if (_currentPanelIndex > 0) {
-        // Move to previous panel
         setState(() {
           _currentPanelIndex--;
         });
-      } else {
-        // Already at first panel; go to previous page's last panel if possible
-        if (_currentPageIndex > 0) {
-          final prevIndex = _currentPageIndex - 1;
-          final prevPreds = widget.comic.predictions.length > prevIndex
-              ? widget.comic.predictions[prevIndex]
-              : null;
-          final prevPanelsCount = prevPreds?.panels.length ?? 0;
-
-          _updatePage(
-            prevIndex,
-            panelIndex: prevPanelsCount > 0 ? prevPanelsCount - 1 : 0,
-          );
-        }
+      } else if (_currentPageIndex > 0) {
+        final prevIndex = _currentPageIndex - 1;
+        final prevPreds = widget.comic.predictions.length > prevIndex
+            ? widget.comic.predictions[prevIndex]
+            : null;
+        final prevPanelsCount = prevPreds?.panels.length ?? 0;
+        _updatePage(
+          prevIndex,
+          panelIndex: prevPanelsCount > 0 ? prevPanelsCount - 1 : 0,
+        );
       }
-    } else {
-      // Page mode: just go to the previous page if it exists
-      if (_currentPageIndex > 0) {
-        _updatePage(_currentPageIndex - 1);
-      }
+    } else if (_currentPageIndex > 0) {
+      _updatePage(_currentPageIndex - 1);
     }
   }
 
-  /// Navigates to the next panel (if in panel mode), or next page (if in page
-  /// mode).
   void _goToNext() {
     final currentPreds = _currentPageIndex < widget.comic.predictions.length
         ? widget.comic.predictions[_currentPageIndex]
@@ -428,26 +229,18 @@ class ReaderViewState extends State<ReaderView> {
     final totalPanels = currentPreds?.panels.length ?? 0;
 
     if (_panelMode && currentPreds != null && totalPanels > 0) {
-      // If we're not yet at the last panel, go to the next panel
       if (_currentPanelIndex < totalPanels - 1) {
         setState(() {
           _currentPanelIndex++;
         });
-      } else {
-        // If at last panel, try to go to next page's first panel
-        if (_currentPageIndex < (widget.comic.pageCount - 1)) {
-          _updatePage(_currentPageIndex + 1);
-        }
-      }
-    } else {
-      // Page mode: go to next page if possible
-      if (_currentPageIndex < widget.comic.pageCount - 1) {
+      } else if (_currentPageIndex < (widget.comic.pageCount - 1)) {
         _updatePage(_currentPageIndex + 1);
       }
+    } else if (_currentPageIndex < widget.comic.pageCount - 1) {
+      _updatePage(_currentPageIndex + 1);
     }
   }
 
-  /// Translates the page and panel summaries if necessary.
   Future<void> _translateIfNeeded([int? pageIndex]) async {
     final targetPageIndex = pageIndex ?? _currentPageIndex;
     if (_selectedLanguage == 'en') return;
@@ -455,7 +248,6 @@ class ReaderViewState extends State<ReaderView> {
     final lang = _selectedLanguage;
     final requestId = '$targetPageIndex-$lang';
 
-    // Check if translation already exists
     final pageTranslated =
         targetPageIndex < widget.comic.pageSummaries.length &&
         widget.comic.pageSummaries[targetPageIndex]
@@ -469,27 +261,19 @@ class ReaderViewState extends State<ReaderView> {
         );
 
     if (pageTranslated && panelsTranslated) return;
-
-    // Check if already in progress
     if (_pendingTranslations.contains(requestId)) return;
 
     if (mounted && targetPageIndex == _currentPageIndex) {
-      setState(() {
-        // Just to trigger UI refresh for the spinner
-      });
+      setState(() {});
     }
 
     _pendingTranslations.add(requestId);
 
     try {
       final textsToTranslate = <String>[];
-
-      // 1. Page Summary
       if (targetPageIndex < widget.comic.pageSummaries.length) {
         textsToTranslate.add(widget.comic.pageSummaries[targetPageIndex].en);
       }
-
-      // 2. Panel Summaries
       if (targetPageIndex < widget.comic.panelSummaries.length) {
         textsToTranslate.addAll(
           widget.comic.panelSummaries[targetPageIndex].panels.map((p) => p.en),
@@ -505,16 +289,12 @@ class ReaderViewState extends State<ReaderView> {
 
       if (results.length == textsToTranslate.length) {
         var resultIdx = 0;
-
-        // Update Page Summary
         if (targetPageIndex < widget.comic.pageSummaries.length) {
           widget.comic.pageSummaries[targetPageIndex] = widget
               .comic
               .pageSummaries[targetPageIndex]
               .withTranslation(lang, results[resultIdx++]);
         }
-
-        // Update Panel Summaries
         if (targetPageIndex < widget.comic.panelSummaries.length) {
           final currentPanels =
               widget.comic.panelSummaries[targetPageIndex].panels;
@@ -544,4 +324,193 @@ class ReaderViewState extends State<ReaderView> {
     if (!mounted) return;
     super.setState(fn);
   }
+
+  AppBar _buildAppBar() => AppBar(
+    title: Text(
+      widget.comic.title,
+      overflow: TextOverflow.ellipsis,
+      style: const TextStyle(fontSize: 16),
+    ),
+    centerTitle: false,
+    actions: [
+      IconButton(
+        icon: Icon(
+          _panelMode ? Icons.grid_view : Icons.description,
+          color: _panelMode ? Colors.blue : null,
+        ),
+        onPressed: _togglePanelMode,
+        tooltip: _panelMode ? 'Switch to Page Mode' : 'Switch to Panel Mode',
+      ),
+      const SizedBox(width: 8),
+    ],
+  );
+}
+
+class _SummaryOverlay extends StatelessWidget {
+  const _SummaryOverlay({
+    required this.displayedSummary,
+    required this.panelMode,
+    required this.isPending,
+    required this.selectedLanguage,
+    required this.onLanguageChanged,
+    required this.predictionsFailed,
+  });
+
+  final String? displayedSummary;
+  final bool panelMode;
+  final bool isPending;
+  final String selectedLanguage;
+  final ValueChanged<String?> onLanguageChanged;
+  final bool predictionsFailed;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    width: double.infinity,
+    color: panelMode ? Colors.blue[50] : Colors.grey[200],
+    padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 12),
+    child: Row(
+      children: [
+        Expanded(child: _buildSummaryText()),
+        const SizedBox(width: 8),
+        _buildLanguageDropdown(),
+      ],
+    ),
+  );
+
+  Widget _buildSummaryText() {
+    if (isPending) {
+      return const Center(
+        child: Padding(
+          padding: EdgeInsets.all(8),
+          child: CircularProgressIndicator(),
+        ),
+      );
+    }
+
+    final hasContent = displayedSummary?.isNotEmpty ?? false;
+    final text = hasContent
+        ? displayedSummary!
+        : (panelMode
+              ? (predictionsFailed
+                    ? 'Summaries unavailable because panel detection failed '
+                          'for this page.'
+                    : 'No specific summary for this panel.')
+              : 'No page summary available. (Did the import finish?)');
+
+    return Text(
+      text,
+      style: TextStyle(
+        fontSize: 18,
+        color: hasContent ? Colors.black : Colors.grey[600],
+        fontStyle: hasContent ? FontStyle.normal : FontStyle.italic,
+      ),
+    );
+  }
+
+  Widget _buildLanguageDropdown() => DropdownButtonHideUnderline(
+    child: DropdownButton<String>(
+      value: selectedLanguage,
+      icon: const Icon(Icons.language, size: 20),
+      style: const TextStyle(fontSize: 14, color: Colors.black),
+      onChanged: onLanguageChanged,
+      items: const [
+        DropdownMenuItem(value: 'en', child: Text('EN')),
+        DropdownMenuItem(value: 'es', child: Text('ES')),
+        DropdownMenuItem(value: 'fr', child: Text('FR')),
+      ],
+    ),
+  );
+}
+
+class _ReaderSlider extends StatelessWidget {
+  const _ReaderSlider({
+    required this.comic,
+    required this.panelMode,
+    required this.currentPageIndex,
+    required this.currentPanelIndex,
+    required this.onUpdatePage,
+  });
+
+  final Comic comic;
+  final bool panelMode;
+  final int currentPageIndex;
+  final int currentPanelIndex;
+  final Function(int, {int? panelIndex}) onUpdatePage;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: EdgeInsets.symmetric(
+      horizontal: MediaQuery.of(context).size.width * 0.1,
+      vertical: 16,
+    ),
+    child: Builder(
+      builder: (context) {
+        final globalReadingItems = <({int page, int? panel})>[];
+        var currentGlobalIndex = 0;
+
+        if (panelMode) {
+          for (var i = 0; i < comic.pageCount; i++) {
+            final pagePreds = comic.predictions.length > i
+                ? comic.predictions[i]
+                : null;
+            final panels = pagePreds?.panels ?? [];
+            if (panels.isEmpty) {
+              if (i == currentPageIndex) {
+                currentGlobalIndex = globalReadingItems.length;
+              }
+              globalReadingItems.add((page: i, panel: null));
+            } else {
+              for (var j = 0; j < panels.length; j++) {
+                if (i == currentPageIndex && j == currentPanelIndex) {
+                  currentGlobalIndex = globalReadingItems.length;
+                }
+                globalReadingItems.add((page: i, panel: j));
+              }
+            }
+          }
+        }
+
+        final sliderValue = panelMode
+            ? currentGlobalIndex.toDouble()
+            : currentPageIndex.toDouble();
+        final sliderMax = panelMode
+            ? (globalReadingItems.length - 1).toDouble()
+            : (comic.pageCount - 1).toDouble();
+        final sliderDivisions = panelMode
+            ? globalReadingItems.length - 1
+            : comic.pageCount - 1;
+
+        String sliderLabel;
+        if (panelMode) {
+          final item = globalReadingItems[currentGlobalIndex];
+          if (item.panel != null) {
+            sliderLabel = 'Page ${item.page + 1}, Panel ${item.panel! + 1}';
+          } else {
+            sliderLabel = 'Page ${item.page + 1}';
+          }
+        } else {
+          sliderLabel = 'Page ${currentPageIndex + 1}';
+        }
+
+        return Slider(
+          value: sliderValue,
+          min: 0,
+          max: sliderMax > 0 ? sliderMax : 0,
+          divisions: sliderDivisions > 0 ? sliderDivisions : 1,
+          label: sliderLabel,
+          onChanged: (value) {
+            final idx = value.round();
+            if (panelMode) {
+              if (idx >= 0 && idx < globalReadingItems.length) {
+                final item = globalReadingItems[idx];
+                onUpdatePage(item.page, panelIndex: item.panel ?? 0);
+              }
+            } else {
+              onUpdatePage(idx);
+            }
+          },
+        );
+      },
+    ),
+  );
 }
