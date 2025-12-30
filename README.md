@@ -22,8 +22,8 @@ check out the comics from the `comics-for-testing` directory in this repository.
   narrative flow.
 
 ### 3. Smart Translation & Summaries
-- **Initial Pass**: Gemini quickly analyzes pages to provide English summaries and
-  detect panels.
+- **Initial Pass**: Gemini quickly analyzes pages to provide English summaries
+  and detect panels.
 - **On-Demand Translation**: Switch languages (ES, FR) in the reader to trigger
   real-time AI translation, with results cached for the session.
 
@@ -88,20 +88,55 @@ check out the comics from the `comics-for-testing` directory in this repository.
 
 ## AI Implementation Insights
 
-### Optimized AI Analysis
-The core logic resides in `GeminiService`, which leverages the
-`FirebaseAI.googleAI()` SDK for an efficient two-tier processing flow:
-1.  **Initial Analysis (Single-Pass)**: When importing, pages are analyzed once to
-    extract OCR text, a page summary in English, and panel bounding boxes.
-2.  **On-Demand Translation**: To reduce latency and costs, translations for other
-    languages (Spanish, French, etc.) are performed on-the-fly when requested by
-    the user in the reader view.
+This app uses the `firebase_ai` package (powered by Gemini) to provide advanced
+visual analysis and translation.
 
-Extraction includes:
-1.  **Narrative summaries**: High-level context for the entire page.
-2.  **Panel Detection**: Normalized bounding box coordinates `[ymin, xmin, ymax,
-    xmax]` on a 0-1000 scale.
-3.  **Panel Reading Order**: The prompt explicitly instructs the LLM to return
-    panels in their natural reading order.
-4.  **Panel-Specific Summaries**: Unique narrative descriptions for every
-    detected panel.
+### 1. Page Analysis (Vision)
+When a comic is imported, each page is analyzed in a single pass to extract
+summaries and panel bounding boxes.
+
+**System Instruction:**
+> "Analyze this comic book page. Provide a concise English summary and detect
+> all panels. Return panels in their natural reading order (typically
+> top-to-bottom, left-to-right)."
+
+**Implementation Snippet:**
+```dart
+final model = FirebaseAI.googleAI().generativeModel(
+  model: 'gemini-3-flash-preview',
+  systemInstruction: Content.system(_getAnalyzePageSystemInstruction()),
+  generationConfig: GenerationConfig(
+    responseMimeType: 'application/json',
+    responseSchema: _getAnalyzePageSchema(),
+  ),
+);
+
+final response = await model.generateContent([
+  Content.multi([DataPart('image/jpeg', imageBytes), TextPart('Analyze this page.')]),
+]);
+```
+
+### 2. Multi-Text Translation
+To support Spanish and French, we batch the page summary and all panel
+descriptions into a single efficient translation request.
+
+**System Instruction:**
+> "Translate the provided list of English strings into the target language.
+> Maintain the exact order and number of items."
+
+**Implementation Snippet:**
+```dart
+final prompt = 'Translate these strings into $targetLanguage:\n' + 
+               texts.map((t) => '- $t').join('\n');
+
+final response = await model.generateContent([Content.text(prompt)]);
+// Results are parsed back into the original order to update the Comic model.
+```
+
+### Key Technical Details
+- **Normalized Coordinates**: Gemini returns panel boxes as `[ymin, xmin, ymax,
+  xmax]` on a 0-1000 scale, making them resolution-independent.
+- **Structured Output**: We use `responseSchema` to ensure the AI always returns
+  valid JSON that matches our Dart models.
+- **Reading Order**: By explicitly asking for reading order in the system
+  prompt, we avoid complex post-processing for the guided reader.

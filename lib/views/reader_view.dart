@@ -196,16 +196,36 @@ class ReaderViewState extends State<ReaderView> {
   }
 
   void _goToPrevious() {
+    if (_panelMode) {
+      _handlePanelNavigation(forward: false);
+    } else if (_currentPageIndex > 0) {
+      _updatePage(_currentPageIndex - 1);
+    }
+  }
+
+  void _goToNext() {
+    if (_panelMode) {
+      _handlePanelNavigation(forward: true);
+    } else if (_currentPageIndex < widget.comic.pageCount - 1) {
+      _updatePage(_currentPageIndex + 1);
+    }
+  }
+
+  void _handlePanelNavigation({required bool forward}) {
     final currentPreds = _currentPageIndex < widget.comic.predictions.length
         ? widget.comic.predictions[_currentPageIndex]
         : null;
     final totalPanels = currentPreds?.panels.length ?? 0;
 
-    if (_panelMode && currentPreds != null && totalPanels > 0) {
+    if (forward) {
+      if (_currentPanelIndex < totalPanels - 1) {
+        setState(() => _currentPanelIndex++);
+      } else if (_currentPageIndex < widget.comic.pageCount - 1) {
+        _updatePage(_currentPageIndex + 1);
+      }
+    } else {
       if (_currentPanelIndex > 0) {
-        setState(() {
-          _currentPanelIndex--;
-        });
+        setState(() => _currentPanelIndex--);
       } else if (_currentPageIndex > 0) {
         final prevIndex = _currentPageIndex - 1;
         final prevPreds = widget.comic.predictions.length > prevIndex
@@ -217,106 +237,94 @@ class ReaderViewState extends State<ReaderView> {
           panelIndex: prevPanelsCount > 0 ? prevPanelsCount - 1 : 0,
         );
       }
-    } else if (_currentPageIndex > 0) {
-      _updatePage(_currentPageIndex - 1);
-    }
-  }
-
-  void _goToNext() {
-    final currentPreds = _currentPageIndex < widget.comic.predictions.length
-        ? widget.comic.predictions[_currentPageIndex]
-        : null;
-    final totalPanels = currentPreds?.panels.length ?? 0;
-
-    if (_panelMode && currentPreds != null && totalPanels > 0) {
-      if (_currentPanelIndex < totalPanels - 1) {
-        setState(() {
-          _currentPanelIndex++;
-        });
-      } else if (_currentPageIndex < (widget.comic.pageCount - 1)) {
-        _updatePage(_currentPageIndex + 1);
-      }
-    } else if (_currentPageIndex < widget.comic.pageCount - 1) {
-      _updatePage(_currentPageIndex + 1);
     }
   }
 
   Future<void> _translateIfNeeded([int? pageIndex]) async {
-    final targetPageIndex = pageIndex ?? _currentPageIndex;
+    final targetIndex = pageIndex ?? _currentPageIndex;
     if (_selectedLanguage == 'en') return;
 
     final lang = _selectedLanguage;
-    final requestId = '$targetPageIndex-$lang';
+    final reqId = '$targetIndex-$lang';
 
+    if (_isAlreadyTranslated(targetIndex, lang)) return;
+    if (_pendingTranslations.contains(reqId)) return;
+
+    _setPending(reqId, true);
+
+    try {
+      final texts = _getTextsToTranslate(targetIndex);
+      if (texts.isEmpty) return;
+
+      final results = await _geminiService.translate(texts, lang);
+      _applyTranslations(targetIndex, lang, results);
+    } on Exception catch (e) {
+      debugPrint('Translation error: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Translation failed: $e')));
+      }
+    } finally {
+      _setPending(reqId, false);
+    }
+  }
+
+  bool _isAlreadyTranslated(int index, String lang) {
     final pageTranslated =
-        targetPageIndex < widget.comic.pageSummaries.length &&
-        widget.comic.pageSummaries[targetPageIndex]
-            .forLanguage(lang)
-            .isNotEmpty;
+        index < widget.comic.pageSummaries.length &&
+        widget.comic.pageSummaries[index].forLanguage(lang).isNotEmpty;
 
     final panelsTranslated =
-        targetPageIndex < widget.comic.panelSummaries.length &&
-        widget.comic.panelSummaries[targetPageIndex].panels.every(
+        index < widget.comic.panelSummaries.length &&
+        widget.comic.panelSummaries[index].panels.every(
           (p) => p.forLanguage(lang).isNotEmpty,
         );
 
-    if (pageTranslated && panelsTranslated) return;
-    if (_pendingTranslations.contains(requestId)) return;
+    return pageTranslated && panelsTranslated;
+  }
 
-    if (mounted && targetPageIndex == _currentPageIndex) {
-      setState(() {});
+  List<String> _getTextsToTranslate(int index) {
+    final texts = <String>[];
+    if (index < widget.comic.pageSummaries.length) {
+      texts.add(widget.comic.pageSummaries[index].en);
     }
+    if (index < widget.comic.panelSummaries.length) {
+      texts.addAll(widget.comic.panelSummaries[index].panels.map((p) => p.en));
+    }
+    return texts;
+  }
 
-    _pendingTranslations.add(requestId);
+  void _applyTranslations(int index, String lang, List<String> results) {
+    if (results.isEmpty) return;
 
-    try {
-      final textsToTranslate = <String>[];
-      if (targetPageIndex < widget.comic.pageSummaries.length) {
-        textsToTranslate.add(widget.comic.pageSummaries[targetPageIndex].en);
-      }
-      if (targetPageIndex < widget.comic.panelSummaries.length) {
-        textsToTranslate.addAll(
-          widget.comic.panelSummaries[targetPageIndex].panels.map((p) => p.en),
+    var resIdx = 0;
+    if (index < widget.comic.pageSummaries.length) {
+      widget.comic.pageSummaries[index] = widget.comic.pageSummaries[index]
+          .withTranslation(lang, results[resIdx++]);
+    }
+    if (index < widget.comic.panelSummaries.length) {
+      final currentPanels = widget.comic.panelSummaries[index].panels;
+      final updatedPanels = <TranslatedText>[];
+      for (var i = 0; i < currentPanels.length; i++) {
+        updatedPanels.add(
+          currentPanels[i].withTranslation(lang, results[resIdx++]),
         );
       }
-
-      if (textsToTranslate.isEmpty) {
-        _pendingTranslations.remove(requestId);
-        return;
-      }
-
-      final results = await _geminiService.translate(textsToTranslate, lang);
-
-      if (results.length == textsToTranslate.length) {
-        var resultIdx = 0;
-        if (targetPageIndex < widget.comic.pageSummaries.length) {
-          widget.comic.pageSummaries[targetPageIndex] = widget
-              .comic
-              .pageSummaries[targetPageIndex]
-              .withTranslation(lang, results[resultIdx++]);
-        }
-        if (targetPageIndex < widget.comic.panelSummaries.length) {
-          final currentPanels =
-              widget.comic.panelSummaries[targetPageIndex].panels;
-          final updatedPanels = <TranslatedText>[];
-          for (var i = 0; i < currentPanels.length; i++) {
-            updatedPanels.add(
-              currentPanels[i].withTranslation(lang, results[resultIdx++]),
-            );
-          }
-          widget.comic.panelSummaries[targetPageIndex] = PagePanelSummaries(
-            panels: updatedPanels,
-          );
-        }
-      }
-    } on Exception catch (e) {
-      debugPrint('Translation error: $e');
-    } finally {
-      _pendingTranslations.remove(requestId);
-      if (mounted && targetPageIndex == _currentPageIndex) {
-        setState(() {});
-      }
+      widget.comic.panelSummaries[index] = PagePanelSummaries(
+        panels: updatedPanels,
+      );
     }
+  }
+
+  void _setPending(String reqId, bool pending) {
+    setState(() {
+      if (pending) {
+        _pendingTranslations.add(reqId);
+      } else {
+        _pendingTranslations.remove(reqId);
+      }
+    });
   }
 
   @override

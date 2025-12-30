@@ -7,8 +7,6 @@ class Comic {
     required this.id,
     required this.title,
     this.thumbnailImage,
-    this.author,
-    this.series,
     this.pageCount = 0,
     this.currentPage = 0,
     DateTime? lastReadDate,
@@ -22,8 +20,6 @@ class Comic {
     id: map['id']?.toString() ?? '',
     title: map['title']?.toString() ?? '',
     thumbnailImage: map['thumbnailImage']?.toString(),
-    author: map['author']?.toString(),
-    series: map['series']?.toString(),
     pageCount: (map['pageCount'] as num?)?.toInt() ?? 0,
     currentPage: (map['currentPage'] as num?)?.toInt() ?? 0,
     lastReadDate: map['lastReadDate'] != null
@@ -47,29 +43,25 @@ class Comic {
   final String id;
   final String title;
   final String? thumbnailImage;
-  final String? author;
-  final String? series;
   final int pageCount;
   int currentPage;
   DateTime lastReadDate;
-  List<String> pageImages;
+  final List<String> pageImages;
 
   /// Panel predictions for each page.
-  List<Predictions> predictions;
+  final List<Predictions> predictions;
 
   /// Summaries for each page (translated into multiple languages).
-  List<TranslatedText> pageSummaries;
+  final List<TranslatedText> pageSummaries;
 
   /// Summaries for each panel on each page (translated into multiple
   /// languages).
-  List<PagePanelSummaries> panelSummaries;
+  final List<PagePanelSummaries> panelSummaries;
 
   Map<String, dynamic> toMap() => {
     'id': id,
     'title': title,
     'thumbnailImage': thumbnailImage,
-    'author': author,
-    'series': series,
     'pageCount': pageCount,
     'currentPage': currentPage,
     'lastReadDate': lastReadDate.toIso8601String(),

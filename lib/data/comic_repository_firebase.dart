@@ -110,10 +110,6 @@ class ComicRepositoryFirebase {
     }
   }
 
-  Future<void> cleanupPartialUpload(String userId, String comicId) async {
-    await deleteComic(userId, comicId);
-  }
-
   Future<void> updateCurrentPage(
     String userId,
     String comicId,

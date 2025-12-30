@@ -15,24 +15,6 @@ class Panel {
     this.pixelBox,
   });
 
-  factory Panel.fromJson(Map<String, dynamic> json) {
-    final bbox = (json['bbox'] as List)
-        .map((e) => (e as num).toDouble())
-        .toList();
-    // bbox order: [xMin, xMax, yMin, yMax]
-    return Panel(
-      id: json['id'] as String,
-      displayName: json['displayName'] as String,
-      confidence: (json['confidence'] as num).toDouble(),
-      normalizedBox: Rect.fromLTRB(
-        bbox[0], // xMin
-        bbox[2], // yMin
-        bbox[1], // xMax
-        bbox[3], // yMax
-      ),
-    );
-  }
-
   factory Panel.fromMap(Map<String, dynamic> map) {
     final nb = map['normalizedBox'] as Map<String, dynamic>;
     final pb = map['pixelBox'] as Map<String, dynamic>?;
@@ -74,12 +56,6 @@ class Panel {
   /// Optional pixel-based bounding box coordinates. This is typically derived
   /// from [normalizedBox] and image dimensions.
   Rect? pixelBox;
-
-  /// The horizontal center of the panel in normalized coordinates.
-  double get normalizedCenterX => normalizedBox.left + normalizedBox.width / 2;
-
-  /// The vertical center of the panel in normalized coordinates.
-  double get normalizedCenterY => normalizedBox.top + normalizedBox.height / 2;
 
   /// Converts the normalized coordinates to pixel coordinates for a given image
   /// size.
